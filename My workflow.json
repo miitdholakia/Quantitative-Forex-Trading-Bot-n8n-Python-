@@ -1,0 +1,702 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "https://api.twelvedata.com/time_series",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.message.text }}"
+            },
+            {
+              "name": "interval",
+              "value": "1h"
+            },
+            {
+              "name": "outputsize",
+              "value": "201"
+            },
+            {
+              "name": "apikey"
+            },
+            {
+              "name": "exchange",
+              "value": "FOREX"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        80,
+        304
+      ],
+      "id": "7bc5de83-90e2-43aa-a84b-0eb9476638b0",
+      "name": "HTTP 1h"
+    },
+    {
+      "parameters": {
+        "url": "https://api.twelvedata.com/time_series",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.message.text }}"
+            },
+            {
+              "name": "interval",
+              "value": "15min"
+            },
+            {
+              "name": "outputsize",
+              "value": "201"
+            },
+            {
+              "name": "apikey"
+            },
+            {
+              "name": "exchange",
+              "value": "FOREX"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        80,
+        160
+      ],
+      "id": "4e2ea4cb-8c28-40b7-8f27-6f948a1166e1",
+      "name": "HTTP 15m"
+    },
+    {
+      "parameters": {
+        "url": "https://api.twelvedata.com/time_series",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.message.text }}"
+            },
+            {
+              "name": "interval",
+              "value": "5min"
+            },
+            {
+              "name": "outputsize",
+              "value": "201"
+            },
+            {
+              "name": "apikey"
+            },
+            {
+              "name": "exchange",
+              "value": "FOREX"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        80,
+        16
+      ],
+      "id": "9fc062e7-19f0-4835-8607-0094cfd08556",
+      "name": "HTTP 5m"
+    },
+    {
+      "parameters": {
+        "url": "https://api.twelvedata.com/time_series",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.message.text }}"
+            },
+            {
+              "name": "interval",
+              "value": "4h"
+            },
+            {
+              "name": "outputsize",
+              "value": "300"
+            },
+            {
+              "name": "apikey"
+            },
+            {
+              "name": "exchange",
+              "value": "FOREX"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        80,
+        448
+      ],
+      "id": "55ee7f9a-de16-473c-b63f-b9e4e0e5792d",
+      "name": "HTTP 4h"
+    },
+    {
+      "parameters": {
+        "url": "https://api.twelvedata.com/time_series",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.message.text }}"
+            },
+            {
+              "name": "interval",
+              "value": "1day"
+            },
+            {
+              "name": "outputsize",
+              "value": "400"
+            },
+            {
+              "name": "apikey"
+            },
+            {
+              "name": "exhange",
+              "value": "FOREX"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        80,
+        592
+      ],
+      "id": "c0c5405b-d3cc-4a6f-a9f9-26a429b9db04",
+      "name": "HTTP 1D"
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE: MTF_Combiner (v3.1 - System Ready)\n// DESC: This node now requires 5 inputs and provides all data for downstream scorers.\n// 1. 5m candles\n// 2. 15m candles\n// 3. 1h candles\n// 4. 4h candles\n// 5. 1D candles\n// It also calculates 'hist_atr_4h' and bundles all data into a single object.\n//\n// --- v3.1 ---\n// + Added 'addTypicalPrice' helper to automatically add (HLC/3) to all candles.\n// + Added robust 'pipSize' fallback logic to the base meta object.\n\nif (items.length < 5) {\n  throw new Error(\"MTF Combiner (v3.1) expects 5 inputs (5m, 15m, 1h, 4h, 1D).\");\n}\n\n// Helper to safely get data\nconst getData = (item, tf) => {\n  if (!item || !item.json || !item.json.values || !item.json.meta) {\n    console.warn(`Input for ${tf} is missing or has invalid format.`);\n    return { values: [], meta: { interval: tf } };\n  }\n  return item.json;\n};\n\n// --- Helper function to calculate ATR (needed for hist_atr_4h) ---\nfunction calculateATR(data, period = 14) {\n    if (!data || data.length < period + 1) return { atr: null, values: [] };\n    \n    // Data is newest first (descending), reverse to be chronological (ascending)\n    const candles = [...data].reverse(); \n    let trValues = [];\n    \n    // Check for bad data in first candle\n    if (isNaN(parseFloat(candles[0].high)) || isNaN(parseFloat(candles[0].low))) {\n        return { atr: null, values: [] };\n    }\n    trValues.push(parseFloat(candles[0].high) - parseFloat(candles[0].low));\n\n    for (let i = 1; i < candles.length; i++) {\n        let h = parseFloat(candles[i].high);\n        let l = parseFloat(candles[i].low);\n        let prevClose = parseFloat(candles[i-1].close);\n        \n        // Skip if any candle data is invalid\n        if (isNaN(h) || isNaN(l) || isNaN(prevClose)) continue; \n        \n        let tr = Math.max(h - l, Math.abs(h - prevClose), Math.abs(l - prevClose));\n        trValues.push(tr);\n    }\n    \n    if(trValues.length < period) return { atr: null, values: [] };\n    \n    let atrValues = [];\n    let sum = 0;\n    for(let i=0; i < period; i++) sum += trValues[i];\n    let firstAtr = sum / period;\n    atrValues.push(firstAtr);\n    \n    let prevAtr = firstAtr;\n    for(let i = period; i < trValues.length; i++) {\n        let currentAtr = ((prevAtr * (period - 1)) + trValues[i]) / period;\n        atrValues.push(currentAtr);\n        prevAtr = currentAtr;\n    }\n    \n    // Return all values, in chronological order (oldest to newest)\n    return { atr: atrValues[atrValues.length - 1], values: atrValues };\n}\n// --- End ATR Helper ---\n\n// --- v3.1 NEW HELPER ---\n/**\n * Iterates over a candle array and adds the 'typical' price (HLC/3).\n * @param {Array} candles - Array of candle objects.\n * @returns {Array} - New array with 'typical' price added.\n */\nfunction addTypicalPrice(candles) {\n    if (!candles || candles.length === 0) return [];\n    return candles.map(c => {\n        const high = parseFloat(c.high);\n        const low = parseFloat(c.low);\n        const close = parseFloat(c.close);\n        \n        // If data is bad, return original candle\n        if (isNaN(high) || isNaN(low) || isNaN(close)) {\n            return c;\n        }\n        \n        const typical = (high + low + close) / 3;\n        // Return a new object with all original properties + typical\n        return { ...c, typical: typical };\n    });\n}\n// --- End v3.1 Helper ---\n\n// Assign inputs based on expected order\nconst data_5m  = getData(items[0], '5m');\nconst data_15m = getData(items[1], '15m');\nconst data_1h  = getData(items[2], '1h');\nconst data_4h  = getData(items[3], '4h');\nconst data_1d  = getData(items[4], '1D'); // <-- (Item 12) NEW 5th INPUT\n\n// --- (Item 12) Calculate historical ATR for 4H ---\n// This is REQUIRED by all scorers for atr_4h_norm\nconst atr4h_data = calculateATR(data_4h.values || [], 14);\n\n// Get the last 90 ATR values (or as many as we have)\n// The `values` array is chronological (oldest to newest)\nconst hist_atr_4h = atr4h_data.values.slice(-90); \n// --- End new calculation ---\n\n// Use the 15m data as the \"base\" for the symbol and primary meta\nconst symbol = data_15m.meta.symbol || data_1h.meta.symbol || 'UNKNOWN';\n\n// This meta object MUST contain the pip_size.\nconst baseMeta = data_15m.meta;\n\n// --- v3.1 FIX: Add robust pipSize fallback ---\nif (baseMeta && !baseMeta.pip_size) {\n    baseMeta.pip_size = symbol.includes('JPY') ? 0.01 : 0.0001;\n    console.warn(`MTF_Combiner: pip_size was missing, defaulted to ${baseMeta.pip_size}`);\n}\n// ---\n\nconst combinedData = {\n  symbol: symbol,\n  primary_tf: '15m', // We'll base our LTF signal on the 15m\n  trend_tf: '4h',    // We'll base our HTF bias on the 4h\n  \n  // --- All required candle data ---\n  // --- v3.1: Apply 'addTypicalPrice' to all candle arrays ---\n  data_5m: addTypicalPrice(data_5m.values || []),\n  data_15m: addTypicalPrice(data_15m.values || []),\n  data_1h: addTypicalPrice(data_1h.values || []),\n  data_4h: addTypicalPrice(data_4h.values || []),\n  data_daily: addTypicalPrice(data_1d.values || []), // <-- (Item 12) RENAMED to 'data_daily'\n\n  // --- (Item 12) NEW Required data ---\n  hist_atr_4h: hist_atr_4h,\n  \n  // Pass along meta from the primary (LTF) timeframe\n  meta: baseMeta \n};\n\n// Return a *single item* containing all data\nreturn [{ json: combinedData }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        656,
+        400
+      ],
+      "id": "66824dc8-d934-4597-87bc-bbc7576f6efe",
+      "name": "MTF",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "url": "https://api.twelvedata.com/quote",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "apikey"
+            },
+            {
+              "name": "symbol",
+              "value": "={{ $json.message.text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -224,
+        704
+      ],
+      "id": "5cd68c0d-262c-4ea6-a6e8-cdd09a8ac4d4",
+      "name": "Quote"
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE: S/R Filter (v2.1 - High Performance Pivots)\n// FIX: Removed stray 's' character typo\n// INPUT: Receives data from the HTTP 1D node.\n// OUTPUT: A clean JSON object with PDH/PDL/PDC and Classic Daily Pivot Points (S3-R3).\n\nconst item = items[0];\n\n// Helper to format price levels neatly\nconst formatPrice = (price) => {\n  // Use 2 decimal places for XAU/USD\n  return parseFloat(price.toFixed(2));\n}\n\n// --- Main Logic ---\nif (!item || !item.json || !item.json.values || item.json.values.length < 2) {\n  console.warn(\"S/R Filter: Not enough 1D data to calculate pivots. Need at least 2 daily candles.\");\n  // Return empty/null data so the Scorer can safely ignore it\n  return [{ json: {\n    pdh: null,\n    pdl: null,\n    pdc: null,\n    pivots: null,\n    error: \"Not enough 1D data\"\n  }}];\n}\n\n// values[0] is the current (incomplete) day\n// values[1] is the previous (completed) day's candle\nconst prevDay = item.json.values[1];\n\nconst pdh = parseFloat(prevDay.high);\nconst pdl = parseFloat(prevDay.low);\nconst pdc = parseFloat(prevDay.close);\n\n// --- Classic Pivot Point Calculation ---\nconst p = (pdh + pdl + pdc) / 3;\nconst r1 = (2 * p) - pdl;\nconst s1 = (2 * p) - pdh;\nconst r2 = p + (pdh - pdl);\nconst s2 = p - (pdh - pdl);\nconst r3 = pdh + 2 * (p - pdl);\nconst s3 = pdl - 2 * (pdh - p);\n\nconst sr_data = {\n  // Pass the raw daily levels\n  pdh: formatPrice(pdh),\n  pdl: formatPrice(pdl), // <-- TYPO REMOVED HERE\n  pdc: formatPrice(pdc),\n  // Pass the calculated pivot map\n  pivots: {\n    p:  formatPrice(p),\n    r1: formatPrice(r1),\n    s1: formatPrice(s1),\n    r2: formatPrice(r2),\n    s2: formatPrice(s2),\n    r3: formatPrice(r3),\n    s3: formatPrice(s3)\n  }\n};\n\n// Return a single, clean S/R data object\nreturn [{ json: sr_data }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        656,
+        592
+      ],
+      "id": "ce268a79-1ce6-4582-8e0f-10b3e6486dea",
+      "name": "S/R Filter"
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        880,
+        656
+      ],
+      "id": "ba25d7fb-f1ad-4a87-b023-506fdf536423",
+      "name": "AI_Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE: Scorer_Structure (v1.1)\n// DESC: Generates signals based on simple BOS/CHOCH logic using PDH/PDL.\n// REQUIRES: data_1h, data_4h, data_daily, hist_atr_4h\n// REQUIRES: ** `pdh` and `pdl` from srData **\n// ---\n// v1.1 FIXES:\n// - Added data reversal fix for all TA calculations (fixes 'ema' bug).\n// - Implemented robust pipSize fallback logic.\n// - Corrected final indicator key to 'rsi_1h'.\n// - Filled in all standard helper functions.\n\n// --- Standard Helper Functions ---\nfunction calculateRSI(data, period = 14) {\n    if (!data || data.length < period + 1) return { rsi: null, error: 'Not enough RSI data' };\n    let gains = 0;\n    let losses = 0;\n    // Calculate initial average gains and losses\n    for (let i = 1; i <= period; i++) {\n        const change = data[i].close - data[i - 1].close;\n        if (change > 0) {\n            gains += change;\n        } else {\n            losses -= change;\n        }\n    }\n    let avgGain = gains / period;\n    let avgLoss = losses / period;\n    // Smooth the RSI\n    for (let i = period + 1; i < data.length; i++) {\n        const change = data[i].close - data[i - 1].close;\n        let gain = 0;\n        let loss = 0;\n        if (change > 0) {\n            gain = change;\n        } else {\n            loss = -change;\n        }\n        avgGain = (avgGain * (period - 1) + gain) / period;\n        avgLoss = (avgLoss * (period - 1) + loss) / period;\n    }\n    if (avgLoss === 0) return { rsi: 100 };\n    const rs = avgGain / avgLoss;\n    const rsi = 100 - (100 / (1 + rs));\n    return { rsi: rsi };\n}\n\nfunction calculateATR(data, period = 14) {\n    if (!data || data.length < period + 1) return { atr: null, error: 'Not enough ATR data' };\n    let trs = [];\n    // Calculate True Ranges\n    for (let i = 1; i < data.length; i++) {\n        const high = parseFloat(data[i].high);\n        const low = parseFloat(data[i].low);\n        const prevClose = parseFloat(data[i - 1].close);\n        const tr1 = high - low;\n        const tr2 = Math.abs(high - prevClose);\n        const tr3 = Math.abs(low - prevClose);\n        const trueRange = Math.max(tr1, tr2, tr3);\n        trs.push(trueRange);\n    }\n    if (trs.length < period) return { atr: null, error: 'Not enough TR data for ATR' };\n    \n    // Initial ATR (SMA of first 'period' TRs)\n    let initialAtr = 0;\n    for (let i = 0; i < period; i++) {\n        initialAtr += trs[i];\n    }\n    let atr = initialAtr / period;\n    \n    // Smooth the rest\n    for (let i = period; i < trs.length; i++) {\n        atr = (atr * (period - 1) + trs[i]) / period;\n    }\n    return { atr: atr };\n}\n\nfunction calculateEMA(data, period = 21) {\n    if (!data || data.length < period) return { ema: null, error: 'Not enough EMA data' };\n    const k = 2 / (period + 1);\n    let ema = 0;\n    // Calculate initial SMA\n    for (let i = 0; i < period; i++) {\n        ema += parseFloat(data[i].close);\n    }\n    ema /= period;\n    // Calculate EMA for the rest\n    for (let i = period; i < data.length; i++) {\n        ema = (parseFloat(data[i].close) * k) + (ema * (1 - k));\n    }\n    return { ema: ema };\n}\n\nfunction computeAtr4hNorm(last_atr_4h, histATRArray) {\n    if (last_atr_4h === null || last_atr_4h === undefined || !histATRArray || histATRArray.length < 20) {\n        return null; // Not enough data\n    }\n    try {\n        const sortedAtr = [...histATRArray].sort((a, b) => a - b);\n        let rank = sortedAtr.findIndex(val => val >= last_atr_4h);\n        if (rank === -1) {\n            rank = sortedAtr.length;\n        }\n        const percentile = rank / sortedAtr.length;\n        return percentile;\n    } catch (e) {\n        console.error(\"Error in computeAtr4hNorm:\", e.message);\n        return null;\n    }\n}\n\nfunction normalizeOutput(out, pipSize = 0.0001) {\n    const mapType = { 'market_structure': 'market_structure' }; // New type\n    out.signalType = mapType[out.signalType] || out.signalType || 'market_structure';\n    out.confidence = Math.max(0, Math.min(1, Number(out.confidence || 0)));\n    out.recommendedSLPips = out.recommendedSLPips ? Math.round(out.recommendedSLPips) : null;\n    out.recommendedTPPips = out.recommendedTPPips ? Math.round(out.recommendedTPPips) : null;\n    out.indicators = out.indicators || {};\n    if (out.indicators.atr_1h_pips == null && out.indicators.atr_1h) {\n        out.indicators.atr_1h_pips = Math.round(out.indicators.atr_1h / pipSize);\n    }\n    if (out.indicators.daily_price_above_ema_200 == null) { out.indicators.daily_price_above_ema_200 = null; }\n    if (out.indicators.atr_4h_norm == null) { out.indicators.atr_4h_norm = null; }\n    return out;\n}\n// --- End Standard Helpers ---\n\n// --- Main Strategy Logic ---\nif (items.length < 3) {\n    throw new Error(\"Scorer (Structure) expects 3 items from AI_Merge node.\");\n}\n\n// 1. Parse data\nconst candleData = items[0].json;\nconst srData     = items[1].json;\nconst { symbol, data_15m, data_1h, data_4h, data_daily, meta, hist_atr_4h } = candleData;\nconst { pdh, pdl } = srData; // This scorer NEEDS pdh/pdl\n\n// --- v1.1 FIX: Added robust pipSize fallback ---\nconst pipSize = meta.pip_size || (symbol.includes('JPY') ? 0.01 : 0.0001);\n// ---\n\nlet signal = 'flat';\nlet confidence = 0.0;\nlet reason = \"No signal\";\n\n// 2. Check for minimum data\nif (!data_1h || !data_4h || !data_daily || data_1h.length < 50 || data_4h.length < 50 || data_daily.length < 200) {\n    return [{ json: normalizeOutput({ symbol, signal: 'flat', confidence: 0, reason: 'Not enough candle data' }, pipSize) }];\n}\nif (!pdh || !pdl) {\n    return [{ json: normalizeOutput({ symbol, signal: 'flat', confidence: 0, reason: 'VETO: Missing PDH/PDL from srData.' }, pipSize) }];\n}\n\n// 3. Get All Indicators\n\n// --- v1.1 FIX: Reverse data for TA calculations ---\nconst daily_data_for_ta = data_daily.slice().reverse();\nconst data_4h_for_ta = data_4h.slice().reverse();\nconst data_1h_for_ta = data_1h.slice().reverse();\n// ---\n\n// --- v1.1 FIX: Use reversed data for all TA calls ---\nconst daily_ema_200 = calculateEMA(daily_data_for_ta, 200);\nconst last_daily_price = parseFloat(data_daily[0].close);\nconst daily_above_200 = (daily_ema_200.ema && last_daily_price > daily_ema_200.ema) ? true : false;\n\nconst atr_4h = calculateATR(data_4h_for_ta, 14);\nconst atr_4h_norm = computeAtr4hNorm(atr_4h.atr, hist_atr_4h);\n\nconst atr_1h = calculateATR(data_1h_for_ta, 14);\nconst rsi_1h = calculateRSI(data_1h_for_ta, 14); // Use 1H for structure confirmation\n// ---\n\nconst last_price = parseFloat(data_1h[0].close);\nconst atr_1h_pips = (atr_1h.atr && pipSize) ? Math.round(atr_1h.atr / pipSize) : 20;\n\nif (!atr_1h.atr || !rsi_1h.rsi) {\n    return [{ json: normalizeOutput({ symbol, signal: 'flat', confidence: 0, reason: 'Failed to calculate ATR/RSI.' }, pipSize) }];\n}\n\n// 4. Market Structure Logic (BOS/CHOCH)\nconst htf_bias = daily_above_200 ? 'Up' : 'Down';\nconst slPips = Math.max(15, Math.round(atr_1h_pips * 2.0)); // Wider SL for structure plays\nlet tpPips = Math.round(slPips * 1.5);\n\n// Use previous candle close to confirm the break\nconst prev_price = parseFloat(data_1h[1].close);\n\nif (htf_bias === 'Up') {\n    // Look for Bullish BOS (Break of Structure)\n    if (prev_price < pdh && last_price > pdh && rsi_1h.rsi > 55) {\n        signal = 'buy';\n        confidence = 0.70;\n        reason = \"HTF Up, Bullish BOS (Break of PDH) w/ Momentum\";\n    }\n    // Look for Bearish CHOCH (Change of Character)\n    else if (prev_price > pdl && last_price < pdl && rsi_1h.rsi < 45) {\n        signal = 'sell';\n        confidence = 0.65;\n        reason = \"HTF Up, Bearish CHOCH (Break of PDL)\";\n    }\n} else if (htf_bias === 'Down') {\n    // Look for Bearish BOS (Break of Structure)\n    if (prev_price > pdl && last_price < pdl && rsi_1h.rsi < 45) {\n        signal = 'sell';\n        confidence = 0.70;\n        reason = \"HTF Down, Bearish BOS (Break of PDL) w/ Momentum\";\n    }\n    // Look for Bullish CHOCH (Change of Character)\n    else if (prev_price < pdh && last_price > pdh && rsi_1h.rsi > 55) {\n        signal = 'buy';\n        confidence = 0.65;\n        reason = \"HTF Down, Bullish CHOCH (Break of PDH)\";\n    }\n}\n\n// 5. Final Return\nlet finalJson = { \n    symbol, \n    signal, \n    confidence, \n    price: last_price,\n    recommendedSLPips: signal !== 'flat' ? slPips : null,\n    recommendedTPPips: signal !== 'flat' ? tpPips : null,\n    reason,\n    signalType: \"market_structure\",\n    indicators: {\n        // v1.1 FIX: Key 'rsi_1h' matches the data source 'rsi_1h.rsi'\n        rsi_1h: rsi_1h.rsi,\n        atr_1h: atr_1h.atr,\n        daily_price_above_ema_200: daily_above_200,\n        atr_4h_norm: atr_4h_norm,\n        atr_1h_pips: atr_1h_pips\n    },\n    sr_data: srData,\n    meta: meta\n};\n\nreturn [ { json: normalizeOutput(finalJson, pipSize) } ];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1136,
+        960
+      ],
+      "id": "7686789a-f3a0-47f7-82cf-7b929bc895bd",
+      "name": "Scorer_Structure"
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE: Scorer_Liquidity (v1.1)\n// DESC: Generates signals based on 1H Fair Value Gaps (FVG).\n// REQUIRES: data_1h, data_4h, data_daily, hist_atr_4h\n// ---\n// v1.1 FIXES:\n// - Corrected 'computeATRNorm' function call typo.\n// - Corrected 'computeAtr4hNorm' argument (passes .atr value).\n// - Corrected 'daily_above_200' variable mismatch (uses 'daily_200_ema').\n\n// --- Standard Helper Functions ---\nfunction calculateRSI(data, period = 14) {\n    if (!data || data.length < period + 1) return { rsi: null, error: 'Not enough RSI data' };\n    let gains = 0;\n    let losses = 0;\n    // Calculate initial average gains and losses\n    for (let i = 1; i <= period; i++) {\n        const change = data[i].close - data[i - 1].close;\n        if (change > 0) {\n            gains += change;\n        } else {\n            losses -= change;\n        }\n    }\n    let avgGain = gains / period;\n    let avgLoss = losses / period;\n    // Smooth the RSI\n    for (let i = period + 1; i < data.length; i++) {\n        const change = data[i].close - data[i - 1].close;\n        let gain = 0;\n        let loss = 0;\n        if (change > 0) {\n            gain = change;\n        } else {\n            loss = -change;\n        }\n        avgGain = (avgGain * (period - 1) + gain) / period;\n        avgLoss = (avgLoss * (period - 1) + loss) / period;\n    }\n    if (avgLoss === 0) return { rsi: 100 };\n    const rs = avgGain / avgLoss;\n    const rsi = 100 - (100 / (1 + rs));\n    return { rsi: rsi };\n}\n\nfunction calculateATR(data, period = 14) {\n    if (!data || data.length < period + 1) return { atr: null, error: 'Not enough ATR data' };\n    let trs = [];\n    // Calculate True Ranges\n    for (let i = 1; i < data.length; i++) {\n        const high = parseFloat(data[i].high);\n        const low = parseFloat(data[i].low);\n        const prevClose = parseFloat(data[i - 1].close);\n        const tr1 = high - low;\n        const tr2 = Math.abs(high - prevClose);\n        const tr3 = Math.abs(low - prevClose);\n        const trueRange = Math.max(tr1, tr2, tr3);\n        trs.push(trueRange);\n    }\n    // We only need the most recent ATR, so we can use a simple moving average for the first one\n    // and then smooth for the rest, but it's common to just smooth from the start.\n    // Let's calculate the smoothed ATR.\n    if (trs.length < period) return { atr: null, error: 'Not enough TR data for ATR' };\n    \n    // Initial ATR (SMA of first 'period' TRs)\n    let initialAtr = 0;\n    for (let i = 0; i < period; i++) {\n        initialAtr += trs[i];\n    }\n    let atr = initialAtr / period;\n    \n    // Smooth the rest\n    for (let i = period; i < trs.length; i++) {\n        atr = (atr * (period - 1) + trs[i]) / period;\n    }\n    return { atr: atr };\n}\n\nfunction calculateEMA(data, period = 21) {\n    if (!data || data.length < period) return { ema: null, error: 'Not enough EMA data' };\n    const k = 2 / (period + 1);\n    let ema = 0;\n    // Calculate initial SMA\n    for (let i = 0; i < period; i++) {\n        ema += parseFloat(data[i].close);\n    }\n    ema /= period;\n    // Calculate EMA for the rest\n    for (let i = period; i < data.length; i++) {\n        ema = (parseFloat(data[i].close) * k) + (ema * (1 - k));\n    }\n    return { ema: ema };\n}\n\nfunction computeAtr4hNorm(last_atr_4h, histATRArray) {\n    if (last_atr_4h === null || last_atr_4h === undefined || !histATRArray || histATRArray.length < 20) {\n        return null; // Not enough data\n    }\n    try {\n        // Sort the historical ATR data\n        const sortedAtr = [...histATRArray].sort((a, b) => a - b);\n        \n        // Find the rank of the current ATR\n        // We find the first index where the sorted value is >= current ATR\n        let rank = sortedAtr.findIndex(val => val >= last_atr_4h);\n        \n        // If not found (i.e., current ATR is highest), set rank to max\n        if (rank === -1) {\n            rank = sortedAtr.length;\n        }\n        \n        // Normalize the rank to a 0-1 percentile\n        const percentile = rank / sortedAtr.length;\n        return percentile;\n    } catch (e) {\n        console.error(\"Error in computeAtr4hNorm:\", e.message);\n        return null;\n    }\n}\n\nfunction normalizeOutput(out, pipSize = 0.0001) {\n    const mapType = { 'liquidity': 'liquidity' }; // New type\n    out.signalType = mapType[out.signalType] || out.signalType || 'liquidity';\n    out.confidence = Math.max(0, Math.min(1, Number(out.confidence || 0)));\n    out.recommendedSLPips = out.recommendedSLPips ? Math.round(out.recommendedSLPips) : null;\n    out.recommendedTPPips = out.recommendedTPPips ? Math.round(out.recommendedTPPips) : null;\n    out.indicators = out.indicators || {};\n    if (out.indicators.atr_1h_pips == null && out.indicators.atr_1h) {\n        out.indicators.atr_1h_pips = Math.round(out.indicators.atr_1h / pipSize);\n    }\n    if (out.indicators.daily_price_above_ema_200 == null) { out.indicators.daily_price_above_ema_200 = null; }\n    if (out.indicators.atr_4h_norm == null) { out.indicators.atr_4h_norm = null; }\n    return out;\n}\n// --- End Standard Helpers ---\n\n// --- NEW LIQUIDITY HELPER ---\n/**\n * Finds Fair Value Gaps (FVGs) in a candle array.\n * Assumes candles are in DESCENDING order (newest first).\n * Returns { bullish: [], bearish: [] }\n */\nfunction findFVGs(data) {\n    const bullishFVGs = [];\n    const bearishFVGs = [];\n    // Need at least 3 candles. i=0 is newest, i=1 is middle, i=2 is oldest.\n    // We scan back in time.\n    for (let i = 0; i < data.length - 2; i++) {\n        const c1 = data[i + 2]; // Oldest (e.g., c1)\n        const c2 = data[i + 1]; // Middle (e.g., c2)\n        const c3 = data[i];   // Newest (e.g., c3)\n        \n        const c1_low = parseFloat(c1.low);\n        const c1_high = parseFloat(c1.high);\n        const c3_low = parseFloat(c3.low);\n        const c3_high = parseFloat(c3.high);\n\n        // Bullish FVG (gap between c1.high and c3.low)\n        if (c1_high < c3_low) {\n            bullishFVGs.push({ top: c3_low, bottom: c1_high, time: c3.time });\n        }\n        \n        // Bearish FVG (gap between c1.low and c3.high)\n        if (c1_low > c3_high) {\n            bearishFVGs.push({ top: c1_low, bottom: c3_high, time: c3.time });\n        }\n    }\n    return { bullish: bullishFVGs, bearish: bearishFVGs };\n}\n\n// --- Main Strategy Logic ---\nif (items.length < 3) {\n    throw new Error(\"Scorer (Liquidity) expects 3 items from AI_Merge node.\");\n}\n\n// 1. Parse data\nconst candleData = items[0].json;\nconst srData     = items[1].json;\nconst { symbol, data_15m, data_1h, data_4h, data_daily, meta, hist_atr_4h } = candleData;\n\n// --- v1.2 FIX: Added robust pipSize fallback ---\n// Default to 0.0001 for most pairs, 0.01 for JPY pairs, if meta.pip_size is missing.\nconst pipSize = meta.pip_size || (symbol.includes('JPY') ? 0.01 : 0.0001);\n// ---\n\nlet signal = 'flat';\nlet confidence = 0.0;\nlet reason = \"No signal\";\n\n// 2. Check for minimum data\nif (!data_1h || !data_4h || !data_daily || data_1h.length < 50 || data_4h.length < 50 || data_daily.length < 200) {\n    return [{ json: normalizeOutput({ symbol, signal: 'flat', confidence: 0, reason: 'Not enough candle data' }, pipSize) }];\n}\n\n// 3. Get All Indicators\n\n// variables data_daily, data_4h, data_1h, hist_atr_4h are already available\n\n// --- Verification Step (Optional but Recommended) ---\nconsole.log(`Received ${data_daily.length} daily candles for processing.`);\nconsole.log(`Received ${data_4h.length} 4-hour candles for processing.`);\n\n// --- FIX 2: Reverse data for TA calculations ---\n// Most TA libraries require data to be in oldest-to-newest order.\nconst daily_data_for_ta = data_daily.slice().reverse();\nconst data_4h_for_ta = data_4h.slice().reverse();\nconst data_1h_for_ta = data_1h.slice().reverse();\n\n\n// --- Run Calculations with Corrected Data ---\n\n// Calculate Daily EMA\nconst daily_ema_200 = calculateEMA(daily_data_for_ta, 200);\nconst last_daily_price = parseFloat(data_daily[0].close);\n// Safely check if daily_ema_200 and its .ema property exist before comparing\nconst daily_200_ema = (daily_ema_200 && daily_ema_200.ema && last_daily_price > daily_ema_200.ema) ? true : false;\n\n// Calculate 4H Indicators\nconst atr_4h = calculateATR(data_4h_for_ta, 14);\nconst last_atr_4h_value = atr_4h ? atr_4h.atr : undefined;\n\n// --- FIX 1: Corrected function name and argument ---\n// From: computeATRNorm(atr_4h, hist_atr_4h)\n// To:\nconst atr_4h_norm = computeAtr4hNorm(last_atr_4h_value, hist_atr_4h);\n// ---\nconst rsi_4h = calculateRSI(data_4h_for_ta, 14);\n\n// Calculate 1H Indicators\nconst atr_1h = calculateATR(data_1h_for_ta, 14);\n\n// Get latest 1H price from the ORIGINAL array\nconst last_price = parseFloat(data_1h[0].close);\nconst atr_1h_value = atr_1h ? atr_1h.atr : undefined;\n\nconst atr_1h_pips = (atr_1h_value && pipSize) ? Math.round(atr_1h_value / pipSize) : 20;\n\nif (!atr_1h_value) {\n     return [{ json: normalizeOutput({ symbol, signal: 'flat', confidence: 0, reason: 'Could not calculate 1H ATR' }, pipSize) }];\n}\n\n// 4. Liquidity Logic\nconst fvgs = findFVGs(data_1h);\n\n// --- FIX 2: Corrected variable name ---\n// From: daily_above_200\n// To:\nconst htf_bias = daily_200_ema ? 'Up' : 'Down';\n// ---\n\nconst slPips = Math.max(15, Math.round(atr_1h_pips * 1.5));\nlet tpPips = Math.round(slPips * 1.8);\n\nif (htf_bias === 'Up' && fvgs.bullish.length > 0) {\n    // Find nearest Bullish FVG *below* current price\n    const targets = fvgs.bullish\n        .filter(fvg => fvg.top < last_price)\n        .sort((a, b) => b.top - a.top); // Sort descending by top, nearest is [0]\n    \n    if (targets.length > 0) {\n        const nearestFVG = targets[0];\n        const distToFVG = last_price - nearestFVG.top;\n        \n        // If price is within 1 ATR of the FVG, consider it a pullback\n        if (distToFVG > 0 && distToFVG < (atr_1h_value * 1.0)) {\n            signal = 'buy';\n            confidence = 0.60;\n            reason = \"HTF Up, Price pulling back to nearest 1H Bullish FVG\";\n            // Set SL below the FVG bottom\n            const slPrice = nearestFVG.bottom - (atr_1h_value * 0.25);\n            // Recalculate SLPips based on price\n            const calculatedSLPips = Math.abs(last_price - slPrice) / pipSize;\n            // Target 2R\n            tpPips = Math.round(calculatedSLPips * 2.0);\n        }\n    }\n} else if (htf_bias === 'Down' && fvgs.bearish.length > 0) {\n    // Find nearest Bearish FVG *above* current price\n    const targets = fvgs.bearish\n        .filter(fvg => fvg.bottom > last_price)\n        .sort((a, b) => a.bottom - b.bottom); // Sort ascending by bottom, nearest is [0]\n        \n    if (targets.length > 0) {\n        const nearestFVG = targets[0];\n        const distToFVG = nearestFVG.bottom - last_price;\n        \n        if (distToFVG > 0 && distToFVG < (atr_1h_value * 1.0)) {\n            signal = 'sell';\n            confidence = 0.60;\n            reason = \"HTF Down, Price pulling back to nearest 1H Bearish FVG\";\n            const slPrice = nearestFVG.top + (atr_1h_value * 0.25);\n            // Recalculate SLPips based on price\n            const calculatedSLPips = Math.abs(last_price - slPrice) / pipSize;\n            // Target 2R\n            tpPips = Math.round(calculatedSLPips * 2.0);\n        }\n    }\n}\n\n// 5. Final Return\nlet finalJson = { \n    symbol, \n    signal, \n    confidence, \n    price: last_price,\n    recommendedSLPips: signal !== 'flat' ? slPips : null, // Use calculated SL if signal\n    recommendedTPPips: signal !== 'flat' ? tpPips : null, // Use calculated TP if signal\n    reason,\n    signalType: \"liquidity\",\n    indicators: {\n        rsi_4h: rsi_4h.rsi,\n        atr_1h: atr_1h.atr,\n        // --- FIX 3: Corrected variable name ---\n        // From: daily_above_200\n        // To:\n        daily_price_above_ema_200: daily_200_ema,\n        // ---\n        atr_4h_norm: atr_4h_norm,\n        atr_1h_pips: atr_1h_pips\n    },\n    sr_data: srData,\n    meta: meta\n};\n\nreturn [ { json: normalizeOutput(finalJson, pipSize) } ];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        736
+      ],
+      "id": "9026210a-5e66-4ed8-9dc2-cf38ad0cd6da",
+      "name": "Scorer_Liquidity"
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE: Scorer_VWAP (v1.0)\n// DESC: Generates signals based on VWAP bias.\n// REQUIRES: data_1h, data_15m, data_daily, hist_atr_4h\n// REQUIRES: ** `volume` and `typical` (HLC/3) on candle objects **\n// --- BLUEPRINT PATCHES APPLIED (Item 3, 4, 5, 12) ---\n// NEW v1.0: Provides 'vwap_bias' signalType\n\n// --- Standard Helper Functions ---\nfunction calculateRSI(data, period = 14) { /* ... (Same as other scorers) ... */ }\nfunction calculateATR(data, period = 14) { /* ... (Same as other scorers) ... */ }\nfunction calculateEMA(data, period = 21) { /* ... (Same as other scorers) ... */ }\nfunction computeAtr4hNorm(last_atr_4h, histATRArray) { /* ... (Same as other scorers) ... */ }\nfunction normalizeOutput(out, pipSize = 0.0001) {\n    const mapType = { 'vwap_bias': 'vwap_bias' }; // New type\n    out.signalType = mapType[out.signalType] || out.signalType || 'vwap_bias';\n    out.confidence = Math.max(0, Math.min(1, Number(out.confidence || 0)));\n    out.recommendedSLPips = out.recommendedSLPips ? Math.round(out.recommendedSLPips) : null;\n    out.recommendedTPPips = out.recommendedTPPips ? Math.round(out.recommendedTPPips) : null;\n    out.indicators = out.indicators || {};\n    if (out.indicators.atr_1h_pips == null && out.indicators.atr_1h) {\n        out.indicators.atr_1h_pips = Math.round(out.indicators.atr_1h / pipSize);\n    }\n    if (out.indicators.daily_price_above_ema_200 == null) { out.indicators.daily_price_above_ema_200 = null; }\n    if (out.indicators.atr_4h_norm == null) { out.indicators.atr_4h_norm = null; }\n    return out;\n}\n// --- End Standard Helpers ---\n\n// --- NEW VWAP HELPER ---\n/**\n * Calculates (Volume Weighted Average Price) for a given set of candles.\n * Assumes candles are in DESCENDING order (newest first).\n * Assumes candle objects have `typical` (HLC/3) and `volume` properties.\n */\nfunction calculateVWAP(data) {\n    if (!data || data.length === 0 || !data[0].typical || !data[0].volume) {\n        return null; // Not enough data or missing required fields\n    }\n    \n    // Reverse to calculate from oldest to newest for a cumulative sum\n    const candles = [...data].reverse();\n    \n    let cumulativeTypicalVolume = 0;\n    let cumulativeVolume = 0;\n    \n    for (const candle of candles) {\n        const typicalPrice = parseFloat(candle.typical);\n        const volume = parseFloat(candle.volume);\n        \n        if (isNaN(typicalPrice) || isNaN(volume)) continue;\n        \n        cumulativeTypicalVolume += typicalPrice * volume;\n        cumulativeVolume += volume;\n    }\n    \n    if (cumulativeVolume === 0) return null;\n    return cumulativeTypicalVolume / cumulativeVolume;\n}\n\n// --- Main Strategy Logic ---\nif (items.length < 3) {\n    throw new Error(\"Scorer (VWAP) expects 3 items from AI_Merge node.\");\n}\n\n// 1. Parse data\nconst candleData = items[0].json;\nconst srData     = items[1].json;\nconst { symbol, data_15m, data_1h, data_4h, data_daily, meta, hist_atr_4h } = candleData;\nconst pipSize = meta.pip_size || 0.01;\n\nlet signal = 'flat';\nlet confidence = 0.0;\nlet reason = \"No signal\";\n\n// 2. Check for minimum data\nif (!data_1h || !data_15m || !data_4h || !data_daily || data_1h.length < 24 || data_15m.length < 24 || data_4h.length < 50 || data_daily.length < 200) {\n    return [{ json: normalizeOutput({ symbol, signal: 'flat', confidence: 0, reason: 'Not enough candle data' }, pipSize) }];\n}\n// CRITICAL CHECK: Check for volume and typical price\nif (!data_15m[0].volume || !data_15m[0].typical || !data_1h[0].volume || !data_1h[0].typical) {\n    return [{ json: normalizeOutput({ symbol, signal: 'flat', confidence: 0, reason: 'VETO: Candle data is missing `volume` or `typical` properties.' }, pipSize) }];\n}\n\n// 3. Get All Indicators\n// --- (Item 12) Standard indicators for Trader Node ---\nconst daily_ema_200 = calculateEMA(data_daily, 200);\nconst last_daily_price = parseFloat(data_daily[0].close);\nconst daily_above_200 = (daily_ema_200.ema && last_daily_price > daily_ema_200.ema) ? true : false;\nconst atr_4h = calculateATR(data_4h, 14);\nconst atr_4h_norm = computeAtr4hNorm(atr_4h.atr, hist_atr_4h);\nconst atr_1h = calculateATR(data_1h, 14);\nconst rsi_4h = calculateRSI(data_4h, 14);\n// --- End Standard ---\n\nconst vwap_1h = calculateVWAP(data_1h);\nconst vwap_15m = calculateVWAP(data_15m);\nconst last_price = parseFloat(data_15m[0].close);\nconst atr_1h_pips = (atr_1h.atr && pipSize) ? Math.round(atr_1h.atr / pipSize) : 20;\nconst vwap_zone = (atr_1h.atr || 0) * 0.25;\n\nif (!vwap_1h || !vwap_15m || !atr_1h.atr) {\n    return [{ json: normalizeOutput({ symbol, signal: 'flat', confidence: 0, reason: 'Failed to calculate VWAP or ATR.' }, pipSize) }];\n}\n\n// 4. VWAP Bias Logic\nconst htf_bias = daily_above_200 ? 'Up' : 'Down';\nconst slPips = Math.max(15, Math.round(atr_1h_pips * 1.5));\nlet tpPips = Math.round(slPips * 1.8); // Default TP\n\nif (htf_bias === 'Up' && last_price > vwap_1h) {\n    // HTF Bias is Up, 1H price is above 1H VWAP (Bullish)\n    // Look for a pullback to the 15m VWAP\n    if (last_price < (vwap_15m + vwap_zone) && last_price > (vwap_15m - vwap_zone)) {\n        signal = 'buy';\n        confidence = 0.65;\n        reason = \"HTF Up, Price > 1H VWAP, Pullback to 15m VWAP support\";\n    }\n} else if (htf_bias === 'Down' && last_price < vwap_1h) {\n    // HTF Bias is Down, 1H price is below 1H VWAP (Bearish)\n    // Look for a pullback to the 15m VWAP\n    if (last_price > (vwap_15m - vwap_zone) && last_price < (vwap_15m + vwap_zone)) {\n        signal = 'sell';\n        confidence = 0.65;\n        reason = \"HTF Down, Price < 1H VWAP, Pullback to 15m VWAP resistance\";\n    }\n}\n\n// 5. Final Return\nlet finalJson = { \n    symbol, \n    signal, \n    confidence, \n    price: last_price,\n    recommendedSLPips: slPips,\n    recommendedTPPips: tpPips,\n    reason,\n    signalType: \"vwap_bias\",\n    indicators: {\n        rsi_4h: rsi_4h.rsi,\n        atr_1h: atr_1h.atr,\n        daily_price_above_ema_200: daily_above_200,\n        atr_4h_norm: atr_4h_norm,\n        atr_1h_pips: atr_1h_pips,\n        vwap_1h: vwap_1h,\n        vwap_15m: vwap_15m\n    },\n    sr_data: srData,\n    meta: meta\n};\n\nreturn [ { json: normalizeOutput(finalJson, pipSize) } ];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        848
+      ],
+      "id": "1f971f59-38c9-449a-8d11-21869891ba09",
+      "name": "Scorer_VWAP"
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE: Scorer_Breakout (v2.1 - PDH/PDL Break-and-Retest)\n// VERSION: 2.1\n// DESC: Fixed syntax errors (stray chars, missing comma).\n//       - Waits for 15m break, then retest of PDH/PDL.\n//       - Added structural SL (based on the broken level).\n//       - Added structural TP (based on S1/R1 pivots).\n//       - Added Session Filter (London/NY opens).\n// INPUT: Expects 3 items from the AI_Merge node (Mode: Wait)\n// - items[0]: Candle Data (from MTF Node)\n// - items[1]: S/R Pivot Data (from S/R Filter)\n// - items[2]: Quote Data (Unused)\n// OUTPUT: A signal for the Trader node.\n\n// --- Helper Functions (Unchanged) ---\nfunction calculateRSI(data, period = 14) {\n    if (!data || data.length < period + 1) return { rsi: 50, values: [] };\n    const prices = data.map(d => parseFloat(d.close)).reverse();\n    if (prices.length < period + 1) return { rsi: 50, values: [] };\n    \n    let gains = 0;\n    let losses = 0;\n    let rsiValues = [];\n\n    for (let i = 1; i <= period; i++) {\n        let change = prices[i] - prices[i - 1];\n        if (change > 0) gains += change;\n        else losses -= change;\n    }\n\n    let avgGain = gains / period;\n    let avgLoss = losses / period;\n\n    rsiValues.push(100 - (100 / (1 + (avgGain / avgLoss))));\n\n    for (let i = period + 1; i < prices.length; i++) {\n        let change = prices[i] - prices[i - 1];\n        let gain = change > 0 ? change : 0;\n        let loss = change < 0 ? -change : 0;\n        avgGain = ((avgGain * (period - 1)) + gain) / period;\n        avgLoss = ((avgLoss * (period - 1)) + loss) / period;\n        let rs = (avgLoss === 0) ? 100 : avgGain / avgLoss;\n        rsiValues.push(100 - (100 / (1 + rs)));\n    }\n    \n    return { rsi: rsiValues[rsiValues.length - 1], values: rsiValues };\n}\n\nfunction calculateATR(data, period = 14) {\n    if (!data || data.length < period + 1) return { atr: null, values: [] };\n    // FIX: Removed a stray underscore '_' from the next line\n    const candles = [...data].reverse();\n    let trValues = [];\n    trValues.push(parseFloat(candles[0].high) - parseFloat(candles[0].low));\n\n    for (let i = 1; i < candles.length; i++) {\n        let h = parseFloat(candles[i].high);\n        let l = parseFloat(candles[i].low);\n        let prevClose = parseFloat(candles[i-1].close);\n        let tr = Math.max(h - l, Math.abs(h - prevClose), Math.abs(l - prevClose));\n        trValues.push(tr);\n    }\n\n    let atrValues = [];\n    let sum = 0;\n    for(let i=0; i < period; i++) sum += trValues[i];\n    let firstAtr = sum / period;\n    atrValues.push(firstAtr);\n    \n    let prevAtr = firstAtr;\n    for(let i = period; i < trValues.length; i++) {\n        let currentAtr = ((prevAtr * (period - 1)) + trValues[i]) / period;\n        atrValues.push(currentAtr);\n        prevAtr = currentAtr;\n    }\n\n    return { atr: atrValues[atrValues.length - 1], values: atrValues };\n}\n\nfunction calculateEMA(data, period = 21) {\n    if (!data || data.length < period) return { ema: null, values: [] };\n    const prices = data.map(d => parseFloat(d.close)).reverse();\n    let emaValues = [];\n    const k = 2 / (period + 1); // Smoothing factor\n\n    let sum = 0;\n    for (let i = 0; i < period; i++) {\n        sum += prices[i];\n    }\n    let prevEma = sum / period;\n    emaValues.push(prevEma);\n\n    for (let i = period; i < prices.length; i++) {\n        let ema = (prices[i] * k) + (prevEma * (1 - k));\n        emaValues.push(ema);\n        prevEma = ema;\n    }\n\n    return { ema: emaValues[emaValues.length - 1], values: emaValues };\n}\n// --- End Helpers ---\n\n\n// --- Main Strategy Logic (B&R) ---\nif (items.length < 3) {\n    throw new Error(\"Scorer (B&R) expects 3 items from AI_Merge node.\");\n}\n\n// 1. Parse data\nconst candleData = items[0].json;\nconst srData     = items[1].json;\nconst { symbol, data_5m, data_15m, data_1h, data_4h, meta } = candleData;\nconst { pivots, pdh, pdl } = srData; // Pivots (R1, S1) are now used\nconst pipSize = meta.pip_size || 0.01;\n\nlet signal = 'flat';\nlet confidence = 0.0;\nlet reason = \"No signal\";\nlet htf_bias = 'flat';\n\n// 2. Check for minimum data\n// We now need at least 2 15m candles for B&R logic\nif (data_4h.length < 55 || data_15m.length < 30 || data_1h.length < 30 || !pdh || !pdl) {\n    return [{ json: { symbol, signal: 'flat', confidence: 0, reason: 'Not enough data for B&R (needs candles + PDH/PDL)', sr_data: srData } }];\n}\n\n// 3. Get All Indicators\nconst rsi_4h      = calculateRSI(data_4h, 14);\nconst ema_4h      = calculateEMA(data_4h, 50);\nconst rsi_15m     = calculateRSI(data_15m, 14);\nconst atr_1h      = calculateATR(data_1h, 14);\nconst atr_15m     = calculateATR(data_15m, 14); // For volatility check\n\n// Check if indicators are valid\nif (!rsi_4h.rsi || !ema_4h.ema || !rsi_15m.rsi || !atr_1h.atr || !atr_15m.atr) {\n    return [{ json: { symbol, signal: 'flat', confidence: 0, reason: 'Indicator calculation failed, not enough data.', sr_data: srData } }];\n}\n\nconst last_rsi_4h    = rsi_4h.rsi;\nconst last_ema_4h    = ema_4h.ema;\nconst last_price_4h  = parseFloat(data_4h[0].close);\nconst last_rsi_15m   = rsi_15m.rsi;\nconst last_price_15m = parseFloat(data_15m[0].close);\nconst prev_close_15m = parseFloat(data_15m[1].close); // Get previous close for B&R\nconst last_atr_1h    = atr_1h.atr;\n\n// --- FILTER 1: VOLATILITY (Unchanged) ---\nconst VOLATILITY_SPIKE_MULT = 3.0;\nconst current_15m_candle = data_15m[0];\nconst current_15m_range = parseFloat(current_15m_candle.high) - parseFloat(current_15m_candle.low);\nconst avg_15m_range = atr_15m.atr;\n\nif (current_15m_range > (avg_15m_range * VOLATILITY_SPIKE_MULT)) {\n    reason = `VETO (B&R): Volatility spike detected. Market unsafe.`;\n    return [{ json: { symbol, signal: 'flat', confidence: 0, reason, sr_data: srData } }];\n}\n\n// 4. Determine Trend Bias (4-Hour Chart) - Simplified\nif (last_price_4h > last_ema_4h) {\n    htf_bias = 'long';\n} else if (last_price_4h < last_ema_4h) {\n    htf_bias = 'short';\n}\n\n// --- FILTER 2: SESSION FILTER (NEW) ---\nconst currentDate = new Date(data_15m[0].time * 1000);\nconst currentHour = currentDate.getUTCHours();\n// Only trade London Open (7-10) or NY Open (12-15)\nconst isHighLiquidity = (currentHour >= 7 && currentHour <= 10) || (currentHour >= 12 && currentHour <= 15);\n\n// 5. Look for Break-and-Retest (B&R) Entry (15-Min Chart)\nconst sr_zone_amount = last_atr_1h * 0.25; // 25% of 1H ATR for retest zone & SL buffer\nconst retest_rsi_buy  = 55; // For B&R, we want RSI to show momentum is *holding*\nconst retest_rsi_sell = 45;\n\nif (htf_bias === 'long' && isHighLiquidity) {\n    // Look for a Break-and-Retest of PDH\n    const hasBrokenPDH = prev_close_15m > pdh; // 1. Did we *break* above PDH?\n    const isRetestingPDH = last_price_15m < (pdh + sr_zone_amount) && last_price_15m > pdh; // 2. Is price *retesting* the level?\n    const hasMomentum = last_rsi_15m > retest_rsi_buy; // 3. Is momentum holding > 55?\n\n    if (hasBrokenPDH && isRetestingPDH && hasMomentum) {\n        signal = 'buy';\n        reason = \"4H Trend Up, 15m Break-and-Retest of PDH in high-liquidity session.\";\n        confidence = 0.85; // B&R is a high-confidence setup\n    }\n\n} else if (htf_bias === 'short' && isHighLiquidity) {\n    // Look for a Break-and-Retest of PDL\n    const hasBrokenPDL = prev_close_15m < pdl; // 1. Did we *break* below PDL?\n    const isRetestingPDL = last_price_15m > (pdl - sr_zone_amount) && last_price_15m < pdl; // 2. Is price *retesting* the level?\n    const hasMomentum = last_rsi_15m < retest_rsi_sell; // 3. Is momentum holding < 45?\n\n    if (hasBrokenPDL && isRetestingPDL && hasMomentum) {\n        signal = 'sell';\n        reason = \"4H Trend Down, 15m Break-and-Retest of PDL in high-liquidity session.\";\n        confidence = 0.85;\n    }\n}\n\n// 6. No Entry Found\nif (signal === 'flat') {\n    reason = `HTF bias ${htf_bias}. No B&R setup (Session: ${isHighLiquidity}, 15m RSI: ${last_rsi_15m.toFixed(1)})`;\n    return [{ json: { symbol, signal: 'flat', confidence: 0, reason, sr_data: srData } }];\n}\n\n// 7. Calculate Structural SL & TP\nconst currentPrice = parseFloat(data_15m[0].close);\nlet recommendedSLPrice;\nlet recommendedTPPrice;\n\nif (signal === 'buy') {\n    // SL is *below* the PDH (the broken structure)\n    recommendedSLPrice = pdh - sr_zone_amount; \n    // TP is the next major pivot\n    recommendedTPPrice = pivots.R1; \n\n    // Sanity check for TP: Ensure TP is at least 1:1 R:R\n    if (recommendedTPPrice && (recommendedTPPrice < currentPrice + (currentPrice - recommendedSLPrice))) {\n        recommendedTPPrice = pivots.R2 || recommendedTPPrice; // Target R2 if R1 is too close\n    }\n    if (!recommendedTPPrice) reason += \" | Warning: No R1/R2 pivot for TP.\";\n\n} else { // signal === 'sell'\n    // SL is *above* the PDL (the broken structure)\n    recommendedSLPrice = pdl + sr_zone_amount;\n    // TP is the next major pivot\n    recommendedTPPrice = pivots.S1;\n    // FIX: Removed a stray 's' from the next line\n    \n    // Sanity check for TP: Ensure TP is at least 1:1 R:R\n    if (recommendedTPPrice && (recommendedTPPrice > currentPrice - (recommendedSLPrice - currentPrice))) {\n        recommendedTPPrice = pivots.S2 || recommendedTPPrice; // Target S2 if S1 is too close\n    }\n    if (!recommendedTPPrice) reason += \" | Warning: No S1/S2 pivot for TP.\";\n}\n\n// Final check: Veto if no valid TP was found\nif (!recommendedTPPrice) {\n    reason = `VETO: ${signal} triggered but no valid S/R pivot found for Take Profit.`;\n    return [{ json: { symbol, signal: 'flat', confidence: 0, reason, sr_data: srData } }];\n}\n\n// Calculate SL pips\nconst slDistance = Math.abs(currentPrice - recommendedSLPrice);\nconst recommendedSLPips = Math.max(20, Math.round(slDistance / pipSize)); // Min 20 pips\n\nreturn [{ \n    json: { \n        symbol, \n        signal, \n        confidence, \n        price: currentPrice,\n        recommendedSLPips,\n        recommendedSLPrice, // NEW: Added a precise SL price\n        recommendedTPPrice, // NEW: Added a precise TP price\n        reason,\n        signalType: \"break-and-retest\", // NEW: Strategy name\n        indicators: {\n            rsi_4h: last_rsi_4h,\n            rsi_15m: last_rsi_15m,\n            atr_1h: last_atr_1h,\n            // FIX: Added a missing comma to the next line\n            isHighLiquidity // NEW: Added session status\n        },\n        sr_data: srData,\n        meta: meta\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1136,
+        368
+      ],
+      "id": "502eceb5-c5d7-4436-abb7-644cf3e0df75",
+      "name": "Scorer_Breakout"
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE: Scorer (v4.7 - AI Agent w/ Volatility, S/R, TP & Pullback Fix)\n// FIX: Corrected S/R zone logic to use price amount (ATR * mult) instead of pips.\n// NEW v4.7: Added dynamic 4H EMA to S/R filter.\n// NEW v4.7: Added \"shallow_pullback\" entry logic to fill 15m RSI dead-zone.\n// NEW v4.7: Added dynamic Take Profit (TP) calculation based on next S/R level or 1.5 R:R.\n// INPUT: Expects 3 items from the AI_Merge node (Mode: Wait)\n// - items[0]: Candle Data (from MTF Node)\n// - items[1]: S/R Pivot Data (from S/R Filter)\n// - items[2]: Quote Data (This is unused for spread, but required by the merge)\n// OUTPUT: A final, context-aware signal for the Trader node.\n\n// --- CONFIGURATION ---\nconst VOLATILITY_SPIKE_MULT = 3.0; // Veto if current candle range is 3x the 15m ATR\nconst SR_ZONE_ATR_MULT = 0.25;     // S/R zone = 25% of 1H ATR\n// --- End Configuration ---\n\n\n// --- Technical Indicator Helpers ---\n// (All helper functions: calculateRSI, calculateATR, calculateEMA remain unchanged)\nfunction calculateRSI(data, period = 14) {\n    if (!data || data.length < period + 1) return { rsi: 50, values: [] };\n    const prices = data.map(d => parseFloat(d.close)).reverse();\n    if (prices.length < period + 1) return { rsi: 50, values: [] };\n    \n    let gains = 0;\n    let losses = 0;\n    let rsiValues = [];\n\n    for (let i = 1; i <= period; i++) {\n        let change = prices[i] - prices[i - 1];\n        if (change > 0) gains += change;\n        else losses -= change;\n    }\n\n    let avgGain = gains / period;\n    let avgLoss = losses / period;\n    if (avgLoss === 0) rsiValues.push(100);\n    else rsiValues.push(100 - (100 / (1 + (avgGain / avgLoss))));\n\n    for (let i = period + 1; i < prices.length; i++) {\n        let change = prices[i] - prices[i - 1];\n        let gain = change > 0 ? change : 0;\n        let loss = change < 0 ? -change : 0;\n        avgGain = ((avgGain * (period - 1)) + gain) / period;\n        avgLoss = ((avgLoss * (period - 1)) + loss) / period;\n        if (avgLoss === 0) rsiValues.push(100);\n        else rsiValues.push(100 - (100 / (1 + (avgGain / avgLoss))));\n    }\n    \n    return { rsi: rsiValues[rsiValues.length - 1], values: rsiValues };\n}\n\nfunction calculateATR(data, period = 14) {\n    if (!data || data.length < period + 1) return { atr: null, values: [] };\n    const candles = [...data].reverse();\n    let trValues = [];\n    trValues.push(parseFloat(candles[0].high) - parseFloat(candles[0].low));\n\n    for (let i = 1; i < candles.length; i++) {\n        let h = parseFloat(candles[i].high);\n        let l = parseFloat(candles[i].low);\n        let prevClose = parseFloat(candles[i-1].close);\n        let tr = Math.max(h - l, Math.abs(h - prevClose), Math.abs(l - prevClose));\n        trValues.push(tr);\n    }\n\n    let atrValues = [];\n    let sum = 0;\n    for(let i=0; i < period; i++) sum += trValues[i];\n    let firstAtr = sum / period;\n    atrValues.push(firstAtr);\n    \n    let prevAtr = firstAtr;\n    for(let i = period; i < trValues.length; i++) {\n        let currentAtr = ((prevAtr * (period - 1)) + trValues[i]) / period;\n        atrValues.push(currentAtr);\n        prevAtr = currentAtr;\n    }\n\n    return { atr: atrValues[atrValues.length - 1], values: atrValues };\n}\n\nfunction calculateEMA(data, period = 21) {\n    if (!data || data.length < period) return { ema: null, values: [] };\n    const prices = data.map(d => parseFloat(d.close)).reverse();\n    let emaValues = [];\n    const k = 2 / (period + 1); // Smoothing factor\n\n    let sum = 0;\n    for (let i = 0; i < period; i++) {\n        sum += prices[i];\n    }\n    let prevEma = sum / period;\n    emaValues.push(prevEma);\n\n    for (let i = period; i < prices.length; i++) {\n        let ema = (prices[i] * k) + (prevEma * (1 - k));\n        emaValues.push(ema);\n        prevEma = ema;\n    }\n\n    return { ema: emaValues[emaValues.length - 1], values: emaValues };\n}\n// --- End Helpers ---\n\n\n// --- Main Strategy Logic (v4.7) ---\nif (items.length < 3) {\n  throw new Error(\"Scorer (AI Agent) expects 3 items from AI_Merge node. Did you add the AI_Merge node?\");\n}\n\n// 1. Parse all our data streams\nconst candleData = items[0].json;\nconst srData     = items[1].json;\n// items[2] (Quote Data) is ignored.\n\n// Get candle data\nconst { symbol, data_5m, data_15m, data_1h, data_4h, meta } = candleData;\n// Get S/R data\nconst { pivots, pdh, pdl } = srData;\n// Get pip size\nconst pipSize = meta.pip_size || 0.01;\n\nlet signal = 'flat';\nlet confidence = 0.0;\nlet recommendedSLPips = 40; // Default for XAU\nlet recommendedTPPips = 60; // Default for XAU (will be overwritten)\nlet reason = \"No signal\";\nlet htf_bias = 'flat';\nlet market_data_log = { info: \"Spread filter disabled. Quote node not providing bid/ask.\" };\n\n// 2. Check for minimum candle data\nif (data_4h.length < 55 || data_15m.length < 30 || data_1h.length < 30) {\n    return [{ json: { symbol, signal: 'flat', confidence: 0, reason: 'Not enough data for EMAs/RSI', market_data: market_data_log, sr_data: srData } }];\n}\n\n// 3. Get All Indicators\nconst rsi_4h   = calculateRSI(data_4h, 14);\nconst ema_4h   = calculateEMA(data_4h, 50);\nconst rsi_15m  = calculateRSI(data_15m, 14);\nconst ema_15m  = calculateEMA(data_15m, 21);\nconst atr_1h   = calculateATR(data_1h, 14);\nconst atr_15m  = calculateATR(data_15m, 14); // For Volatility Filter\n\n// Check if indicators are valid\nif (!rsi_4h.rsi || !ema_4h.ema || !rsi_15m.rsi || !ema_15m.ema || !atr_1h.atr || !atr_15m.atr) {\n    return [{ json: { symbol, signal: 'flat', confidence: 0, reason: 'Indicator calculation failed, not enough data.', market_data: market_data_log, sr_data: srData } }];\n}\n\nconst last_rsi_4h    = rsi_4h.rsi;\nconst last_ema_4h    = ema_4h.ema;\nconst last_price_4h  = parseFloat(data_4h[0].close);\nconst last_rsi_15m   = rsi_15m.rsi;\nconst last_ema_15m   = ema_15m.ema;\nconst last_price_15m = parseFloat(data_15m[0].close);\nconst last_atr_1h    = atr_1h.atr;\nconst last_atr_15m   = atr_15m.atr;\n\n\n// --- FILTER 1: VOLATILITY (NEWS FILTER) ---\nconst current_15m_candle = data_15m[0];\nconst current_15m_range = parseFloat(current_15m_candle.high) - parseFloat(current_15m_candle.low);\nconst avg_15m_range = last_atr_15m;\n\nif (current_15m_range > (avg_15m_range * VOLATILITY_SPIKE_MULT)) {\n  reason = `VETO: Volatility spike detected. 15m range (${current_15m_range.toFixed(2)}) > ${VOLATILITY_SPIKE_MULT}x ATR (${avg_15m_range.toFixed(2)}). Market unsafe.`;\n  return [{ json: { symbol, signal: 'flat', confidence: 0, reason, market_data: market_data_log, sr_data: srData } }];\n}\n// --- End Volatility Filter ---\n\n\n// 4. Determine Trend Bias (4-Hour Chart)\nif (last_price_4h > last_ema_4h && last_rsi_4h > 52) {\n    htf_bias = 'long';\n} else if (last_price_4h < last_ema_4h && last_rsi_4h < 48) {\n    htf_bias = 'short';\n} else {\n    reason = `HTF chop (4H Price vs 50EMA, 4H RSI: ${last_rsi_4h.toFixed(1)})`;\n    return [{ json: { symbol, signal: 'flat', confidence: 0, reason, market_data: market_data_log, sr_data: srData } }];\n}\n\n// 5. Look for LTF Entry (15-Min Chart)\nlet entrySignal = false;\nlet baseConfidence = 0.5; // Start at 50% for a valid setup\nlet signalType = \"none\";\nreason = \"No signal\"; // Reset reason\n\nif (htf_bias === 'long') {\n    // --- Signal 1: Momentum/Continuation ---\n    if (last_price_15m > last_ema_15m && last_rsi_15m > 55) {\n        signal = 'buy';\n        entrySignal = true;\n        signalType = 'momentum';\n        reason = \"4H Trend Up, 15m Momentum (RSI > 55)\";\n        baseConfidence += 0.15; \n        if (last_rsi_4h > 60) baseConfidence += 0.15; \n        if (last_rsi_15m > 65) baseConfidence += 0.10; \n    }\n    // --- Signal 2: Mean-Reversion/Pullback ---\n    else if (last_rsi_15m < 35) {\n        signal = 'buy';\n        entrySignal = true;\n        signalType = 'reversion';\n        reason = \"4H Trend Up, 15m Pullback (RSI < 35)\";\n        if (last_rsi_4h > 60) baseConfidence += 0.10; \n        if (last_rsi_15m < 25) baseConfidence += 0.20; \n    }\n    // --- IMPROVEMENT #1: Shallow Pullback Entry ---\n    else if (last_price_15m <= last_ema_15m && last_rsi_15m > 40) {\n        signal = 'buy';\n        entrySignal = true;\n        signalType = 'shallow_pullback';\n        reason = \"4H Trend Up, 15m Pullback to 21-EMA\";\n        baseConfidence = 0.6; // This is a high-quality signal\n        if (last_rsi_4h > 60) baseConfidence += 0.15;\n    }\n    // --- END IMPROVEMENT #1 ---\n\n} else if (htf_bias === 'short') {\n    // --- Signal 1: Momentum/Continuation ---\n    if (last_price_15m < last_ema_15m && last_rsi_15m < 45) {\n        signal = 'sell';\n        entrySignal = true;\n        signalType = 'momentum';\n        reason = \"4H Trend Down, 15m Momentum (RSI < 45)\";\n        baseConfidence += 0.15;\n        if (last_rsi_4h < 40) baseConfidence += 0.15;\n        if (last_rsi_15m < 35) baseConfidence += 0.10;\n    }\n    // --- Signal 2: Mean-Reversion/Pullback ---\n    else if (last_rsi_15m > 65) {\n        signal = 'sell';\n        entrySignal = true;\n        signalType = 'reversion';\n        reason = \"4H Trend Down, 15m Pullback (RSI > 65)\";\n        if (last_rsi_4h < 40) baseConfidence += 0.10;\n        if (last_rsi_15m > 75) baseConfidence += 0.20;\n    }\n    // --- IMPROVEMENT #1: Shallow Pullback Entry ---\n    else if (last_price_15m >= last_ema_15m && last_rsi_15m < 60) {\n        signal = 'sell';\n        entrySignal = true;\n        signalType = 'shallow_pullback';\n        reason = \"4H Trend Down, 15m Pullback to 21-EMA\";\n        baseConfidence = 0.6; // This is a high-quality signal\n        if (last_rsi_4h < 40) baseConfidence += 0.15;\n    }\n    // --- END IMPROVEMENT #1 ---\n}\n\n// 6. No Entry Found\nif (!entrySignal) {\n    reason = `HTF bias ${htf_bias}, no 15m entry (15m RSI: ${last_rsi_15m.toFixed(1)})`;\n    return [{ json: { symbol, signal: 'flat', confidence: 0, reason, market_data: market_data_log, sr_data: srData } }];\n}\n\n// --- FILTER 2: S/R (CONTEXT) ---\nconst sr_zone_amount = last_atr_1h * SR_ZONE_ATR_MULT; \nlet srContextApplied = false;\n\n// --- IMPROVEMENT #3: Define S/R Levels (Dynamic + Static) ---\nlet supportLevels = [];\nlet resistanceLevels = [];\n\nif (pivots) {\n     supportLevels.push(pivots.s1, pivots.s2, pivots.s3, pdl, pivots.p);\n     resistanceLevels.push(pivots.r1, pivots.r2, pivots.r3, pdh, pivots.p);\n}\n\n// Add dynamic HTF EMA based on bias\nif (htf_bias === 'long') {\n    supportLevels.push(last_ema_4h); // 4H EMA is support\n} else if (htf_bias === 'short') {\n    resistanceLevels.push(last_ema_4h); // 4H EMA is resistance\n}\n\n// Filter out any null/undefined values from the arrays\nsupportLevels = supportLevels.filter(Boolean);\nresistanceLevels = resistanceLevels.filter(Boolean);\n// --- END IMPROVEMENT #3 ---\n\n\n// Now, run the S/R context check using the enhanced arrays\nif (signal === 'buy') {\n  // Check for conflict: buying right into resistance\n  for (const r of resistanceLevels) {\n    if (r && last_price_15m > (r - sr_zone_amount) && last_price_15m < (r + sr_zone_amount)) {\n      baseConfidence -= 0.3;\n      reason += ` (Penalty: At Resistance ${r.toFixed(2)})`;\n      srContextApplied = true;\n      break; // Only apply one penalty\n    }\n  }\n  // Check for confluence: buying at support\n  if (!srContextApplied) { // Don't add bonus if we already added penalty\n    for (const s of supportLevels) {\n      if (s && last_price_15m > (s - sr_zone_amount) && last_price_15m < (s + sr_zone_amount)) {\n        baseConfidence += 0.2;\n        reason += ` (Bonus: At Support ${s.toFixed(2)})`;\n        break; // Only apply one bonus\n      }\n    }\n  }\n} else if (signal === 'sell') {\n  // Check for conflict: selling right into support\n  for (const s of supportLevels) {\n    if (s && last_price_15m > (s - sr_zone_amount) && last_price_15m < (s + sr_zone_amount)) {\n      baseConfidence -= 0.3;\n      reason += ` (Penalty: At Support ${s.toFixed(2)})`;\n      srContextApplied = true;\n      break; \n    }\n  }\n  // Check for confluence: selling at resistance\n  if (!srContextApplied) {\n    for (const r of resistanceLevels) {\n      if (r && last_price_15m > (r - sr_zone_amount) && last_price_15m < (r + sr_zone_amount)) {\n        baseConfidence += 0.2;\n        reason += ` (Bonus: At Resistance ${r.toFixed(2)})`;\n        break;\n      }\n    }\n  }\n}\n\n// 7. Final Veto (if S/R logic made confidence too low)\nconfidence = Math.min(1.0, baseConfidence); // Cap at 100%\nif (confidence < 0.1) { // Absolute minimum confidence\n  reason += \" (VETO: S/R context makes confidence too low)\";\n  return [{ json: { symbol, signal: 'flat', confidence: 0, reason, market_data: market_data_log, sr_data: srData } }];\n}\n\n// 8. Calculate SL, TP & Price\nconst currentPrice = parseFloat(data_15m[0].close);\n\n// --- Calculate SL (Unchanged) ---\nconst slPipsFromATR = (last_atr_1h * 1.5) / pipSize;\nrecommendedSLPips = Math.max(20, Math.round(slPipsFromATR)); // Min 20 pips for XAU\n\n// --- IMPROVEMENT #2: Calculate Dynamic TP ---\n// Note: 'supportLevels' and 'resistanceLevels' are now enhanced from FILTER 2\n\nif (signal === 'buy') {\n    // Find the *nearest* resistance level *above* the current price\n    const targets = resistanceLevels.filter(r => r > currentPrice);\n    if (targets.length > 0) {\n        const nearestTarget = Math.min(...targets);\n        // Set TP just *before* the level (e.g., subtract half a zone)\n        const targetPrice = nearestTarget - (sr_zone_amount / 2); \n        recommendedTPPips = (targetPrice - currentPrice) / pipSize;\n    }\n} else if (signal === 'sell') {\n    // Find the *nearest* support level *below* the current price\n    const targets = supportLevels.filter(s => s < currentPrice);\n    if (targets.length > 0) {\n        const nearestTarget = Math.max(...targets);\n        // Set TP just *before* the level\n        const targetPrice = nearestTarget + (sr_zone_amount / 2);\n        recommendedTPPips = (currentPrice - targetPrice) / pipSize;\n    }\n}\n\n// Ensure TP is at least a 1:1 R:R, otherwise, default to 1.5:1\nif (!recommendedTPPips || recommendedTPPips < recommendedSLPips) {\n    recommendedTPPips = Math.round(recommendedSLPips * 1.5); // Default to 1.5:1 R:R\n} else {\n    recommendedTPPips = Math.round(recommendedTPPips);\n}\n// --- END IMPROVEMENT #2 ---\n\n\n// 9. Final Return\nreturn [{ \n    json: { \n        symbol, \n        signal, \n        confidence, \n        price: currentPrice,\n        recommendedSLPips,\n        recommendedTPPips, // <-- ADDED\n        reason,\n        signalType,\n        indicators: {\n            rsi_4h: last_rsi_4h,\n            ema_4h: last_ema_4h,\n            rsi_15m: last_rsi_15m,\n            ema_15m: last_ema_15m,\n            atr_1h: last_atr_1h,\n            atr_15m: last_atr_15m\n        },\n        market_data: market_data_log,\n        sr_data: srData,\n        meta: meta\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        480
+      ],
+      "id": "dc61e7a7-f55e-470a-95ab-78904fd5adaf",
+      "name": "Scorer_Trend "
+    },
+    {
+      "parameters": {
+        "jsCode": "// NODE: Scorer_Mean_Reversion (v1.2 - BB + StochRSI w/ ADX Filter)\n// VERSION 1.2 CHANGES:\n// - Replaced 4H RSI regime filter with 4H ADX for better ranging/trending detection.\n// - Replaced 15M RSI entry with 15M Stochastic RSI for more sensitive entries.\n// - Refactored confidence to be \"reward-based\" (no penalties).\n// - Added Take Profit target (15m Middle Bollinger Band).\n// - Implemented tiered S/R confluence bonuses (major/minor levels).\n\n// INPUT: Expects 3 items from the AI_Merge node (Mode: Wait)\n// - items[0]: Candle Data (from MTF Node)\n// - items[1]: S/R Pivot Data (from S/R Filter)\n// - items[2]: Quote Data (Unused)\n// OUTPUT: A signal for the Trader node.\n\n// --- CONFIGURATION ---\nconst VOLATILITY_SPIKE_MULT = 3.0;  // Veto if current candle range is 3x the 15m ATR\nconst SR_ZONE_ATR_MULT = 0.25;      // S/R zone = 25% of 1H ATR\nconst ADX_PERIOD = 14;              // ADX period for 4H regime filter\nconst ADX_TREND_THRESHOLD = 25;     // ADX value above which a trend is considered\nconst STOCH_RSI_PERIOD = 14;        // Stochastic RSI period\nconst STOCH_K_SMOOTH = 3;           // Stochastic RSI %K smoothing\nconst STOCH_D_SMOOTH = 3;           // Stochastic RSI %D smoothing\nconst BB_PERIOD = 20;               // Bollinger Bands period\nconst BB_STD_DEV = 2;               // Bollinger Bands standard deviation\nconst SR_BONUS_MINOR = 0.15;        // Confidence bonus for minor S/R (Central Pivot)\nconst SR_BONUS_MAJOR = 0.30;        // Confidence bonus for major S/R (S/R 1-3, PDH/L)\n// --- End Configuration ---\n\n\n// --- Technical Indicator Helpers (RSI, ATR, BB) ---\n// [NOTE: calculateRSI, calculateATR, and calculateBollingerBands functions\n// are unchanged from v1.1 and are assumed to be present here.]\nfunction calculateRSI(data, period = 14) {\n    if (!data || data.length < period + 1) return { rsi: 50, values: [] };\n    const prices = data.map(d => parseFloat(d.close)).reverse();\n    if (prices.length < period + 1) return { rsi: 50, values: [] };\n    let gains = 0, losses = 0, rsiValues = [];\n    for (let i = 1; i <= period; i++) {\n        let change = prices[i] - prices[i - 1];\n        if (change > 0) gains += change; else losses -= change;\n    }\n    let avgGain = gains / period, avgLoss = losses / period;\n    let rs = (avgLoss === 0) ? 100 : avgGain / avgLoss;\n    rsiValues.push(100 - (100 / (1 + rs)));\n    for (let i = period + 1; i < prices.length; i++) {\n        let change = prices[i] - prices[i - 1];\n        let gain = change > 0 ? change : 0, loss = change < 0 ? -change : 0;\n        avgGain = ((avgGain * (period - 1)) + gain) / period;\n        avgLoss = ((avgLoss * (period - 1)) + loss) / period;\n        rs = (avgLoss === 0) ? 100 : avgGain / avgLoss;\n        rsiValues.push(100 - (100 / (1 + rs)));\n    }\n    return { rsi: rsiValues[rsiValues.length - 1], values: rsiValues };\n}\n\nfunction calculateATR(data, period = 14) {\n    if (!data || data.length < period + 1) return { atr: null, values: [] };\n    const candles = [...data].reverse();\n    let trValues = [parseFloat(candles[0].high) - parseFloat(candles[0].low)];\n    for (let i = 1; i < candles.length; i++) {\n        let h = parseFloat(candles[i].high), l = parseFloat(candles[i].low), prevClose = parseFloat(candles[i-1].close);\n        trValues.push(Math.max(h - l, Math.abs(h - prevClose), Math.abs(l - prevClose)));\n    }\n    let atrValues = [];\n    let sum = trValues.slice(0, period).reduce((a, b) => a + b, 0);\n    let firstAtr = sum / period;\n    atrValues.push(firstAtr);\n    let prevAtr = firstAtr;\n    for(let i = period; i < trValues.length; i++) {\n        let currentAtr = ((prevAtr * (period - 1)) + trValues[i]) / period;\n        atrValues.push(currentAtr);\n        prevAtr = currentAtr;\n    }\n    return { atr: atrValues[atrValues.length - 1], values: atrValues };\n}\n\nfunction calculateBollingerBands(data, period = 20, stdDev = 2) {\n    if (!data || data.length < period) return { upper: null, middle: null, lower: null };\n    const prices = data.map(d => parseFloat(d.close)).reverse();\n    let smaValues = [], stdDevValues = [];\n    for (let i = period - 1; i < prices.length; i++) {\n        const window = prices.slice(i - period + 1, i + 1);\n        const sum = window.reduce((a, b) => a + b, 0);\n        const sma = sum / period;\n        smaValues.push(sma);\n        const varianceSum = window.reduce((a, b) => a + Math.pow(b - sma, 2), 0);\n        stdDevValues.push(Math.sqrt(varianceSum / period));\n    }\n    if (smaValues.length === 0) return { upper: null, middle: null, lower: null };\n    const lastSMA = smaValues[smaValues.length - 1];\n    const lastStdDev = stdDevValues[stdDevValues.length - 1];\n    return { upper: lastSMA + (lastStdDev * stdDev), middle: lastSMA, lower: lastSMA - (lastStdDev * stdDev) };\n}\n\n// --- NEW HELPER: Stochastic RSI ---\nfunction calculateStochasticRSI(data, rsiPeriod, stochPeriod, kSmooth, dSmooth) {\n    const rsiResult = calculateRSI(data, rsiPeriod);\n    const rsiValues = rsiResult.values;\n    if (rsiValues.length < stochPeriod) return { k: null, d: null };\n\n    let fastKValues = [];\n    for (let i = stochPeriod - 1; i < rsiValues.length; i++) {\n        const window = rsiValues.slice(i - stochPeriod + 1, i + 1);\n        const currentRSI = rsiValues[i];\n        const minRSI = Math.min(...window);\n        const maxRSI = Math.max(...window);\n        let fastK = 0;\n        if ((maxRSI - minRSI) > 0) {\n            fastK = 100 * (currentRSI - minRSI) / (maxRSI - minRSI);\n        }\n        fastKValues.push(fastK);\n    }\n\n    if (fastKValues.length < kSmooth) return { k: null, d: null };\n\n    // Calculate Slow %K (SMA of Fast %K)\n    let slowKValues = [];\n    for (let i = kSmooth - 1; i < fastKValues.length; i++) {\n        const window = fastKValues.slice(i - kSmooth + 1, i + 1);\n        const sma = window.reduce((a, b) => a + b, 0) / kSmooth;\n        slowKValues.push(sma);\n    }\n    \n    if (slowKValues.length < dSmooth) return { k: slowKValues[slowKValues.length - 1], d: null };\n\n    // Calculate Slow %D (SMA of Slow %K)\n    let slowDValues = [];\n    for (let i = dSmooth - 1; i < slowKValues.length; i++) {\n        const window = slowKValues.slice(i - dSmooth + 1, i + 1);\n        const sma = window.reduce((a, b) => a + b, 0) / dSmooth;\n        slowDValues.push(sma);\n    }\n\n    return {\n        k: slowKValues[slowKValues.length - 1],\n        d: slowDValues[slowDValues.length - 1]\n    };\n}\n\n// --- NEW HELPER: ADX (Average Directional Index) ---\nfunction calculateADX(data, period = 14) {\n    if (!data || data.length < period * 2) return { adx: null, plusDI: null, minusDI: null };\n    const candles = [...data].reverse();\n    \n    let trValues = [], plusDM = [], minusDM = [];\n    \n    // First candle\n    trValues.push(parseFloat(candles[0].high) - parseFloat(candles[0].low));\n    plusDM.push(0);\n    minusDM.push(0);\n\n    // Calculate TR, +DM, -DM\n    for (let i = 1; i < candles.length; i++) {\n        let h = parseFloat(candles[i].high);\n        let l = parseFloat(candles[i].low);\n        let ph = parseFloat(candles[i-1].high);\n        let pl = parseFloat(candles[i-1].low);\n        let pc = parseFloat(candles[i-1].close);\n\n        let tr = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));\n        trValues.push(tr);\n\n        let upMove = h - ph;\n        let downMove = pl - l;\n        \n        plusDM.push((upMove > downMove && upMove > 0) ? upMove : 0);\n        minusDM.push((downMove > upMove && downMove > 0) ? downMove : 0);\n    }\n\n    // Smooth TR, +DM, -DM (Wilder's Smoothing)\n    let sumTR = trValues.slice(0, period).reduce((a, b) => a + b, 0);\n    let sumPlusDM = plusDM.slice(0, period).reduce((a, b) => a + b, 0);\n    let sumMinusDM = minusDM.slice(0, period).reduce((a, b) => a + b, 0);\n\n    let smoothedTRs = [sumTR], smoothedPlusDMs = [sumPlusDM], smoothedMinusDMs = [sumMinusDM];\n    \n    for (let i = period; i < candles.length; i++) {\n        let prevTR = smoothedTRs[smoothedTRs.length - 1];\n        let prevPlusDM = smoothedPlusDMs[smoothedPlusDMs.length - 1];\n        let prevMinusDM = smoothedMinusDMs[smoothedMinusDMs.length - 1];\n        \n        smoothedTRs.push(prevTR - (prevTR / period) + trValues[i]);\n        smoothedPlusDMs.push(prevPlusDM - (prevPlusDM / period) + plusDM[i]);\n        smoothedMinusDMs.push(prevMinusDM - (prevMinusDM / period) + minusDM[i]);\n    }\n\n    // Calculate +DI, -DI, DX, and ADX\n    let plusDIs = [], minusDIs = [], dxValues = [], adxValues = [];\n    \n    for (let i = 0; i < smoothedTRs.length; i++) {\n        let tr = smoothedTRs[i];\n        let plusDI = (tr === 0) ? 0 : 100 * (smoothedPlusDMs[i] / tr);\n        let minusDI = (tr === 0) ? 0 : 100 * (smoothedMinusDMs[i] / tr);\n        plusDIs.push(plusDI);\n        minusDIs.push(minusDI);\n        \n        let diSum = plusDI + minusDI;\n        let dx = (diSum === 0) ? 0 : 100 * (Math.abs(plusDI - minusDI) / diSum);\n        dxValues.push(dx);\n    }\n\n    // First ADX is an average of DX\n    let sumDX = dxValues.slice(0, period).reduce((a, b) => a + b, 0);\n    adxValues.push(sumDX / period);\n\n    // Subsequent ADX use Wilder's smoothing\n    for (let i = period; i < dxValues.length; i++) {\n        let prevADX = adxValues[adxValues.length - 1];\n        adxValues.push((prevADX * (period - 1) + dxValues[i]) / period);\n    }\n\n    return {\n        adx: adxValues[adxValues.length - 1],\n        plusDI: plusDIs[plusDIs.length - 1],\n        minusDI: minusDIs[minusDIs.length - 1]\n    };\n}\n// --- End Helpers ---\n\n\n// --- Main Strategy Logic (Mean Reversion) ---\nif (items.length < 3) {\n    throw new Error(\"Scorer (Mean Reversion) expects 3 items from AI_Merge node.\");\n}\n\n// 1. Parse all data streams\nconst candleData = items[0].json;\nconst srData     = items[1].json;\nconst { symbol, data_5m, data_15m, data_1h, data_4h, meta } = candleData;\nconst { pivots, pdh, pdl } = srData;\nconst pipSize = meta.pip_size || 0.01;\n\nlet signal = 'flat';\nlet confidence = 0.0;\nlet reason = \"No signal\";\n\n// 2. Check for minimum candle data\nif (data_4h.length < 50 || data_15m.length < 50 || data_1h.length < 30 || !pivots) { // Increased 4h/15m req for new indicators\n    return [{ json: { symbol, signal: 'flat', confidence: 0, reason: 'Not enough data for Mean Reversion (needs candles + pivots)', sr_data: srData } }];\n}\n\n// 3. Get All Indicators\nconst adx_4h        = calculateADX(data_4h, ADX_PERIOD); // For regime filter\nconst stochRSI_15m  = calculateStochasticRSI(data_15m, STOCH_RSI_PERIOD, STOCH_RSI_PERIOD, STOCH_K_SMOOTH, STOCH_D_SMOOTH); // For entry\nconst bb_15m        = calculateBollingerBands(data_15m, BB_PERIOD, BB_STD_DEV); // For entry signal\nconst atr_1h        = calculateATR(data_1h, 14); // For SL and S/R zone\nconst atr_15m       = calculateATR(data_15m, 14); // For Volatility Filter\n\n// Check if indicators are valid\nif (!adx_4h.adx || !stochRSI_15m.k || !bb_15m.upper || !atr_1h.atr || !atr_15m.atr) {\n    return [{ json: { symbol, signal: 'flat', confidence: 0, reason: 'Indicator calculation failed, not enough data.', sr_data: srData } }];\n}\n\nconst last_adx_4h      = adx_4h.adx;\nconst last_stochRSI_k  = stochRSI_15m.k;\nconst last_price_15m   = parseFloat(data_15m[0].close);\nconst last_atr_1h      = atr_1h.atr;\n\n// --- FILTER 1: VOLATILITY (NEWS FILTER) ---\nconst current_15m_candle = data_15m[0];\nconst current_15m_range = parseFloat(current_15m_candle.high) - parseFloat(current_15m_candle.low);\nconst avg_15m_range = atr_15m.atr;\n\nif (current_15m_range > (avg_15m_range * VOLATILITY_SPIKE_MULT)) {\n    reason = `VETO (Reversion): Volatility spike detected. Market unsafe.`;\n    return [{ json: { symbol, signal: 'flat', confidence: 0, reason, sr_data: srData } }];\n}\n// --- End Volatility Filter ---\n\n// 4. Define Regime (4-Hour Chart using ADX)\nconst isRanging = (last_adx_4h < ADX_TREND_THRESHOLD);\nconst isTrendingUp = (last_adx_4h >= ADX_TREND_THRESHOLD && adx_4h.plusDI > adx_4h.minusDI);\nconst isTrendingDown = (last_adx_4h >= ADX_TREND_THRESHOLD && adx_4h.minusDI > adx_4h.plusDI);\n\n// 5. Look for LTF Entry (15-Min Chart using StochRSI)\nconst isOverbought = (last_stochRSI_k > 80);\nconst isOversold = (last_stochRSI_k < 20);\nconst atUpperBand = (last_price_15m > bb_15m.upper);\nconst atLowerBand = (last_price_15m < bb_15m.lower);\n\n// --- REWARD-BASED CONFIDENCE ---\n// Start with a low base confidence. This is the score for a\n// risky counter-trend trade *before* S/R confluence.\nlet baseConfidence = 0.30; \n\nif (atLowerBand && isOversold) {\n    // --- Buy Signal ---\n    signal = 'buy';\n    reason = \"15m Oversold (StochRSI < 20) + Below Lower BB\";\n    \n    if (isRanging) {\n        confidence = baseConfidence + 0.4; // Strong bonus (0.7)\n        reason += \" (Context: 4H Ranging)\";\n    } else if (isTrendingUp) {\n        confidence = baseConfidence + 0.3; // Good bonus: Pullback in uptrend (0.6)\n        reason += \" (Context: 4H Uptrend Pullback)\";\n    } else if (isTrendingDown) {\n        confidence = baseConfidence; // No bonus: Fading strong downtrend (0.3)\n        reason += \" (Context: 4H Downtrend)\";\n    }\n\n} else if (atUpperBand && isOverbought) {\n    // --- Sell Signal ---\n    signal = 'sell';\n    reason = \"15m Overbought (StochRSI > 80) + Above Upper BB\";\n\n    if (isRanging) {\n        confidence = baseConfidence + 0.4; // Strong bonus (0.7)\n        reason += \" (Context: 4H Ranging)\";\n    } else if (isTrendingDown) {\n        confidence = baseConfidence + 0.3; // Good bonus: Pullback in downtrend (0.6)\n        reason += \" (Context: 4H Downtrend Pullback)\";\n    } else if (isTrendingUp) {\n        confidence = baseConfidence; // No bonus: Fading strong uptrend (0.3)\n        reason += \" (Context: 4H Uptrend)\";\n    }\n}\n\n// 6. No Entry Found\nif (signal === 'flat') {\n    reason = `No reversion signal (15m StochRSI: ${last_stochRSI_k.toFixed(1)})`;\n    return [{ json: { symbol, signal: 'flat', confidence: 0, reason, sr_data: srData } }];\n}\n\n// --- FILTER 2: S/R (CONTEXT) ---\n// Tiered bonus system for S/R confluence.\nconst sr_zone_amount = last_atr_1h * SR_ZONE_ATR_MULT;\nlet foundConfluence = false;\n\nif (signal === 'buy') {\n    // Check for confluence: buying at support\n    const supportLevels = [\n        { level: pdl, type: 'major' },\n        { level: pivots.s1, type: 'major' },\n        { level: pivots.s2, type: 'major' },\n        { level: pivots.s3, type: 'major' },\n        { level: pivots.p, type: 'minor' }\n    ];\n    \n    for (const s of supportLevels) {\n        if (s.level && last_price_15m > (s.level - sr_zone_amount) && last_price_15m < (s.level + sr_zone_amount)) {\n            let bonus = (s.type === 'major') ? SR_BONUS_MAJOR : SR_BONUS_MINOR;\n            confidence += bonus;\n            reason += ` (Bonus: At ${s.type} Support ${s.level})`;\n            foundConfluence = true;\n            break; \n        }\n    }\n} else if (signal === 'sell') {\n    // Check for confluence: selling at resistance\n    const resistanceLevels = [\n        { level: pdh, type: 'major' },\n        { level: pivots.r1, type: 'major' },\n        { level: pivots.r2, type: 'major' },\n        { level: pivots.r3, type: 'major' },\n        { level: pivots.p, type: 'minor' }\n    ];\n\n    for (const r of resistanceLevels) {\n        if (r.level && last_price_15m > (r.level - sr_zone_amount) && last_price_15m < (r.level + sr_zone_amount)) {\n            let bonus = (r.type === 'major') ? SR_BONUS_MAJOR : SR_BONUS_MINOR;\n            confidence += bonus;\n            reason += ` (Bonus: At ${r.type} Resistance ${r.level})`;\n            foundConfluence = true;\n            break;\n        }\n    }\n}\n\n// 7. Final Veto (if confidence is still too low)\nconfidence = Math.min(1.0, confidence); // Cap at 100%\nif (confidence < baseConfidence) { // Veto if it's below the absolute minimum\n    reason += \" (VETO: Context makes confidence too low)\";\n    return [{ json: { symbol, signal: 'flat', confidence: 0, reason, sr_data: srData } }];\n}\n\n// 8. Calculate SL & TP\nconst currentPrice = parseFloat(data_15m[0].close);\n// SL: Use 1.5x 1-HOUR ATR\nconst slPipsFromATR = (last_atr_1h * 1.5) / pipSize;\nconst recommendedSLPips = Math.max(20, Math.round(slPipsFromATR)); // Min 20 pips\n// TP: Target the 15M Middle Bollinger Band (the \"mean\")\nconst recommendedTPPrice = bb_15m.middle;\n\nreturn [{ \n    json: { \n        symbol, \n        signal, \n        confidence, \n        price: currentPrice,\n        recommendedSLPips,\n        recommendedTPPrice, // NEW: Added Take Profit target\n        reason,\n        signalType: \"reversion\", // Identify the strategy\n        indicators: {\n            adx_4h: last_adx_4h,\n            adx_4h_plusDI: adx_4h.plusDI,\n            adx_4h_minusDI: adx_4h.minusDI,\n            stochRSI_15m_k: last_stochRSI_k,\n            stochRSI_15m_d: stochRSI_15m.d,\n            atr_1h: last_atr_1h,\n            bb_15m_upper: bb_15m.upper,\n            bb_15m_lower: bb_15m.lower,\n            bb_15m_middle: bb_15m.middle\n        },\n        sr_data: srData,\n        meta: meta\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        592
+      ],
+      "id": "5d4767e0-68af-4e02-b6d6-c4cdcbbb5bc0",
+      "name": "Scorer_Mean"
+    },
+    {
+      "parameters": {
+        "numberInputs": 5
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        464,
+        352
+      ],
+      "id": "7084abbc-2fef-430c-985e-7a5b65624ecd",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "jsCode": "/*\n * STATELESS \"SIGNAL CONFLUENCE\" NODE (v1.4)\n *\n * This node's ONLY job is to:\n * 1. Receive all scorer signals.\n * 2. Run the Regime Router and Confluence Logic.\n * 3. Output a single, raw signal object (buy, sell, OR flat) for EVERY symbol.\n *\n * It is STATELESS. All state, risk, and order logic\n * will be handled by your Python MT5 bot.\n *\n * v1.4 LOGIC:\n * - Added `sl_price` and `tp_price` to the final output object.\n * - Added robust pip size calculation.\n *\n * v1.3 LOGIC:\n * - In a trend, it will take all 'OR' (Tech || Dynamic) signals WITH the trend.\n * - It will ALSO take 'reversion' signals AGAINST the trend.\n */\n\nconst allItems = $input.all();\nconst results = []; // This will hold our final raw signal(s)\n\n// --- Configuration (Hardcoded for this node) ---\nconst regimeVolatilityThreshold = 0.7;\nconst TECHNICAL_SCORERS = ['momentum', 'reversion', 'breakout'];\nconst DYNAMIC_SCORERS = ['vwap_bias', 'liquidity', 'market_structure'];\n// ---\n\n// Group items by symbol\nconst grouped = {};\nfor (const it of allItems) {\n  const d = (it && it.json) ? it.json : it;\n  if (!d || !d.symbol) continue;\n  if (!grouped[d.symbol]) grouped[d.symbol] = [];\n  grouped[d.symbol].push(d);\n}\n\n// Process each symbol\nfor (const [symbol, arr] of Object.entries(grouped)) {\n  try {\n    if (!arr || arr.length === 0) {\n      continue; // Skip if something is fundamentally wrong (no data)\n    }\n\n    // --- [Rec 1] Advanced Regime Router (Data Check) ---\n    const firstValidSignal = arr.find(s => s.indicators && s.indicators.rsi_4h !== undefined);\n    if (!firstValidSignal) {\n      console.warn(`No valid indicator data for ${symbol}.`);\n      results.push({ json: { symbol, signal: 'flat', reason: 'VETO: No valid indicator data from any scorer.' } });\n      continue;\n    }\n    const indicators = firstValidSignal.indicators;\n    const rsi_4h = indicators.rsi_4h;\n    const daily_price_above_ema_200 = indicators.daily_price_above_ema_200;\n    const atr_4h_norm = indicators.atr_4h_norm;\n\n    if (rsi_4h === null || rsi_4h === undefined ||\n      daily_price_above_ema_200 === null || daily_price_above_ema_200 === undefined ||\n      atr_4h_norm === null || atr_4h_norm === undefined) {\n      console.warn(`Regime Router: Missing required indicator data for ${symbol}.`);\n      results.push({ json: { symbol, signal: 'flat', reason: 'VETO: Regime Router: Missing required indicator data (RSI, Daily EMA, ATR).' } });\n      continue;\n    }\n\n    // 1. Determine HTF Trend\n    let htf_trend = 'Neutral';\n    if (daily_price_above_ema_200 === true) htf_trend = 'Up';\n    else if (daily_price_above_ema_200 === false) htf_trend = 'Down';\n\n    // 2. Determine Volatility\n    const volatility = (atr_4h_norm > regimeVolatilityThreshold) ? 'High' : 'Low';\n\n    // 3. Veto ALL signals if in Neutral/High-Vol chop\n    if (htf_trend === 'Neutral' && volatility === 'High') {\n      const reason = `Regime: Veto. Volatile CHOP.`;\n      console.log(reason, `(${symbol})`);\n      results.push({ json: { symbol, signal: 'flat', reason, regime: htf_trend } });\n      continue;\n    }\n\n    // --- (v1.3) ADVANCED CONFLUENCE LOGIC ---\n    const buySignals = arr.filter(s => s.signal === 'buy');\n    const sellSignals = arr.filter(s => s.signal === 'sell');\n\n    let filteredArr = [];\n    let confluenceReason = \"No Signal\";\n\n    // --- Find all signal types ---\n    const tech_buys = buySignals.some(s => TECHNICAL_SCORERS.includes(s.signalType));\n    const dynamic_buys = buySignals.some(s => DYNAMIC_SCORERS.includes(s.signalType));\n    const reversion_buys = buySignals.some(s => s.signalType === 'reversion');\n\n    const tech_sells = sellSignals.some(s => TECHNICAL_SCORERS.includes(s.signalType));\n    const dynamic_sells = sellSignals.some(s => DYNAMIC_SCORERS.includes(s.signalType));\n    const reversion_sells = sellSignals.some(s => s.signalType === 'reversion');\n\n\n    if (htf_trend === 'Up') {\n      // --- v1.3 LOGIC: Look for BUYS (with trend) OR REVERSION SELLS (counter-trend) ---\n      if (tech_buys || dynamic_buys) {\n        filteredArr = buySignals;\n        let reasons = [];\n        if (tech_buys) reasons.push(\"Technical\");\n        if (dynamic_buys) reasons.push(\"Dynamic\");\n        confluenceReason = `Signal: ${reasons.join(' + ')} BUYS (With Trend)`;\n      } else if (reversion_sells) {\n        filteredArr = sellSignals.filter(s => s.signalType === 'reversion'); // Only take reversion sells\n        confluenceReason = `Signal: Reversion SELLS (Counter-Trend)`;\n      } else {\n        confluenceReason = `No Buy Signals or Reversion Sells Found`;\n      }\n    } else if (htf_trend === 'Down') {\n      // --- v1.3 LOGIC: Look for SELLS (with trend) OR REVERSION BUYS (counter-trend) ---\n      if (tech_sells || dynamic_sells) {\n        filteredArr = sellSignals;\n        let reasons = [];\n        if (tech_sells) reasons.push(\"Technical\");\n        if (dynamic_sells) reasons.push(\"Dynamic\");\n        confluenceReason = `Signal: ${reasons.join(' + ')} SELLS (With Trend)`;\n      } else if (reversion_buys) {\n        filteredArr = buySignals.filter(s => s.signalType === 'reversion'); // Only take reversion buys\n        confluenceReason = `Signal: Reversion BUYS (Counter-Trend)`;\n      } else {\n        confluenceReason = `No Sell Signals or Reversion Buys Found`;\n      }\n    } else { // htf_trend === 'Neutral' (and Volatility is Low)\n      // --- v1.3 LOGIC: (Same as v1.2) Look for any Reversion or Dynamic signal ---\n      if (reversion_buys || dynamic_buys) {\n        filteredArr = buySignals;\n        let reasons = [];\n        if (reversion_buys) reasons.push(\"Reversion\");\n        if (dynamic_buys) reasons.push(\"Dynamic\");\n        confluenceReason = `Signal: ${reasons.join(' + ')} BUYS (Range)`;\n      } else if (reversion_sells || dynamic_sells) {\n        filteredArr = sellSignals;\n        let reasons = [];\n        if (reversion_sells) reasons.push(\"Reversion\");\n        if (dynamic_sells) reasons.push(\"Dynamic\");\n        confluenceReason = `Signal: ${reasons.join(' + ')} SELLS (Range)`;\n      } else {\n        confluenceReason = \"Range. No Reversion or Dynamic signals.\";\n      }\n    }\n\n    // --- Check if any signals were found ---\n    if (filteredArr.length === 0) {\n      const reason = `Regime: ${htf_trend}. ${confluenceReason}.`;\n      console.log(reason, `(${symbol})`);\n      results.push({ json: { symbol, signal: 'flat', reason, regime: htf_trend } });\n      continue;\n    }\n    // --- END CONFLUENCE LOGIC ---\n\n    // --- If we get here, VALID SIGNALS WERE FOUND ---\n\n    // --- Calculate a confidence-weighted average signal ---\n    const avgConfidence = Math.min(1, filteredArr.reduce((a, b) => a + (b.confidence || 0), 0) / Math.max(1, filteredArr.length));\n\n    // Find the \"best\" signal to provide price, SL, and strategy type\n    filteredArr.sort((a, b) => b.confidence - a.confidence);\n    const bestSignal = filteredArr[0];\n    const strategyType = bestSignal.signalType;\n    \n    // --- v1.4: CALCULATE SL/TP PRICES ---\n    const meta = bestSignal.meta || {};\n    const signal = bestSignal.signal;\n    const price = bestSignal.price;\n    const slPips = bestSignal.recommendedSLPips || null;\n    const tpPips = bestSignal.recommendedTPPips || null;\n\n    // Robust PipSize Logic\n    let pipSize = 0.01; // Default for JPY pairs or XAU\n    if (meta && meta.pip_size) {\n      pipSize = meta.pip_size;\n    } else if (symbol && !symbol.includes('JPY') && !symbol.includes('XAU')) {\n      pipSize = 0.0001; // Default for non-JPY majors/minors\n    }\n\n    let sl_price = null;\n    let tp_price = null;\n\n    if (signal === 'buy' && price && slPips) {\n      sl_price = price - (slPips * pipSize);\n    } else if (signal === 'sell' && price && slPips) {\n      sl_price = price + (slPips * pipSize);\n    }\n\n    if (signal === 'buy' && price && tpPips) {\n      tp_price = price + (tpPips * pipSize);\n    } else if (signal === 'sell' && price && tpPips) {\n      tp_price = price - (tpPips * pipSize);\n    }\n    // --- End v1.4 Calculation ---\n\n    // --- Create the Raw Signal Object ---\n    const rawSignal = {\n      symbol: symbol,\n      signal: signal, // 'buy' or 'sell'\n      price: price,\n      confidence: avgConfidence,\n      strategyType: strategyType,\n      reason: confluenceReason, // e.g., \"Signal: Reversion BUYS (Counter-Trend)\"\n      regime: htf_trend,\n      \n      // --- v1.4: ADDED SL/TP pips AND price ---\n      recommendedSLPips: slPips,\n      recommendedTPPips: tpPips,\n      sl_price: sl_price,\n      tp_price: tp_price,\n      // ---\n      \n      indicators: bestSignal.indicators,\n      sr_data: bestSignal.sr_data,\n      meta: meta\n    };\n\n    // Add this raw signal to the results to be passed to the next node\n    results.push({ json: rawSignal });\n\n  } catch (err) {\n    console.error(`Error processing ${symbol}:`, err.message);\n    results.push({ json: { symbol, signal: 'flat', reason: `VETO: Node error: ${err.message}` } });\n    continue;\n  }\n}\n\n// Return all confluent signals to the next node\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1936,
+        656
+      ],
+      "id": "1f09e96a-42e9-46cc-bbee-ed535ea73ba1",
+      "name": "Confluence",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "chatId": "6694154886",
+        "text": "=🔔 **New Trade Signal: {{ $json.symbol }}** 🔔  \n\n**Action:** {{ $json.signal.toUpperCase() }} \n**Strategy:** {{ $json.strategyType }} \n**Regime:** {{ $json.regime }} \n**Reason:** {{ $json.reason }}  \n\n--- Trade Details --- \n**Entry:** {{ $json.price }} \n**SL:** {{ $json.sl_price }} ({{ $json.recommendedSLPips }} pips) \n**TP:** {{ $json.tp_price }} ({{ $json.recommendedTPPips }} pips)",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2096,
+        656
+      ],
+      "id": "ba303b4b-a241-4f11-b9be-7dfa14063871",
+      "name": "Send a text message",
+      "webhookId": "e7886938-4908-413c-8026-13b3c84d2a16",
+      "credentials": {
+        "telegramApi": {
+          "id": "HwYG10WRugOIWdyu",
+          "name": "Telegram account 4"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "numberInputs": 6
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1776,
+        592
+      ],
+      "id": "e744cef2-4d10-48b5-b893-eaeafe4b1343",
+      "name": "Result Merge"
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -256,
+        304
+      ],
+      "id": "d1562700-75c0-498b-aec9-823b1333517d",
+      "name": "Telegram Trigger",
+      "webhookId": "f8046d20-a721-431b-bee2-fc718efd29f5",
+      "credentials": {
+        "telegramApi": {
+          "id": "HwYG10WRugOIWdyu",
+          "name": "Telegram account 4"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "HTTP 5m": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP 15m": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "HTTP 1h": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "HTTP 4h": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "HTTP 1D": {
+      "main": [
+        [
+          {
+            "node": "S/R Filter",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "MTF": {
+      "main": [
+        [
+          {
+            "node": "AI_Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quote": {
+      "main": [
+        [
+          {
+            "node": "AI_Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "S/R Filter": {
+      "main": [
+        [
+          {
+            "node": "AI_Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "AI_Merge": {
+      "main": [
+        [
+          {
+            "node": "Scorer_Breakout",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Scorer_Trend ",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Scorer_Mean",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Scorer_Liquidity",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Scorer_VWAP",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Scorer_Structure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scorer_Structure": {
+      "main": [
+        [
+          {
+            "node": "Result Merge",
+            "type": "main",
+            "index": 5
+          }
+        ]
+      ]
+    },
+    "Scorer_Liquidity": {
+      "main": [
+        [
+          {
+            "node": "Result Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Scorer_Breakout": {
+      "main": [
+        [
+          {
+            "node": "Result Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scorer_Trend ": {
+      "main": [
+        [
+          {
+            "node": "Result Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Scorer_Mean": {
+      "main": [
+        [
+          {
+            "node": "Result Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "MTF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scorer_VWAP": {
+      "main": [
+        [
+          {
+            "node": "Result Merge",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "Confluence": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Result Merge": {
+      "main": [
+        [
+          {
+            "node": "Confluence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP 5m",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP 15m",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP 1h",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP 4h",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP 1D",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Quote",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "3f0b9ec4-5621-46a6-b5ec-b5ed0327a2f8",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "541c05a5e3fff94c0b8e134ed8a6f92967491e825715c8bd19bbed1bb10f9505"
+  },
+  "id": "1ETnislJ5b9MBzKm",
+  "tags": []
+}
