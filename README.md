@@ -1,5 +1,3 @@
-### In-Depth Workflow & Node-by-Node Analysis
-
 This system is designed as a stateless, multi-stage pipeline. Each node has a specific role, processing the data and passing it to the next stage. Here is a detailed breakdown of each node in the execution order.
 
 
