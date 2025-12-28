@@ -6,7 +6,7 @@ This system is a robust MVP (Minimum Viable Product) for an automated quant desk
 
 Migrating to a Tick-Data Provider (like OANDA or Websockets) to handle real-time spreads.
 
-Implementing a State-Database (Redis) to track open positions and prevent 'Signal Hammering'.
+Implementing a State-Database to track open positions and prevent 'Signal Hammering'.
 
 Vectorized Backtesting in Python to verify that the '0.7 ATR Veto' actually improves the Sharpe Ratio over a 5-year sample.
 
