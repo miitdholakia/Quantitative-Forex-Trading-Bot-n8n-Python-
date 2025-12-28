@@ -49,6 +49,7 @@ This architecture separates market analysis (**n8n**) from order execution (**Py
 We use a **Multi-Strategy Ensemble** approach. Each node looks for a different market phenomenon:
 
 * **Scorer_Structure:** Uses Break-of-Structure (BOS) and Change-of-Character (CHOCH) to track trend health.
+* **Scorer_Breakout:** Targets High-Liquidity Sessions (London/NY) to catch breakout momentum.
 * **Scorer_Liquidity:** Identifies **Fair Value Gaps (FVG)**—imbalances where price moved too fast and needs to "re-fill."
 * **Scorer_Mean_Reversion:** Uses **Bollinger Bands** & **StochRSI** to find "exhausted" price action outside of  deviations.
 * **Scorer_Trend:** A classic momentum model looking for shallow pullbacks to the **15m 21-EMA**.
