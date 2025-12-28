@@ -2,7 +2,13 @@
 
 # Quantitative Forex Pipeline (Stateless Architecture)
 
-This is a comprehensive breakdown of a modular, multi-stage decision engine designed for the Forex markets. It is delivered from the perspective of a systems architect and quantitative trader, prioritizing mathematical consistency and risk-adjusted alpha generation.
+This system is a robust MVP (Minimum Viable Product) for an automated quant desk. It excels at Logic Segregation and Multi-Strategy Confluence. However, to move this to a production hedge-fund level, the next steps would be:
+
+Migrating to a Tick-Data Provider (like OANDA or Websockets) to handle real-time spreads.
+
+Implementing a State-Database (Redis) to track open positions and prevent 'Signal Hammering'.
+
+Vectorized Backtesting in Python to verify that the '0.7 ATR Veto' actually improves the Sharpe Ratio over a 5-year sample.
 
 ## I. System Overview: The Stateless Pipeline
 
