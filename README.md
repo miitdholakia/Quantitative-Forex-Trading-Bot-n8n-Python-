@@ -2,7 +2,7 @@
 
 # Quantitative Forex Pipeline (Stateless Architecture)
 
-This system is a robust MVP (Minimum Viable Product) for an automated quant desk. It excels at Logic Segregation and Multi-Strategy Confluence. However, to move this to a production hedge-fund level, the next steps would be:
+This system is a robust MVP (Minimum Viable Product) for an automated quant desk. It excels at Logic Segregation and Multi-Strategy Confluence. However, to move this to a production hedge-fund level, the next steps would be;
 
 Migrating to a Tick-Data Provider (like OANDA or Websockets) to handle real-time spreads.
 
